@@ -353,10 +353,14 @@ window.DB = (function () {
   const costs = projects.map(p => {
     const spent_pct = p.progress * 0.95;
     const spent = p.budget * (spent_pct/100);
-    const committed = spent + p.budget * 0.12;
     const forecast = p.health === "red" ? p.budget * 1.08 :
                      p.health === "amber" ? p.budget * 1.02 :
                      p.budget * 0.99;
+    // Committed = spent + portion of remaining forecast already contracted/PO'd
+    // Uncommitted portion scales with remaining work (not a flat % of full budget)
+    const remaining_forecast = forecast - spent;
+    const committed_uncommitted = remaining_forecast * 0.60; // 60% of remaining is committed/PO'd
+    const committed = Math.min(spent + committed_uncommitted, forecast); // can never exceed forecast
     return {
       project_id: p.project_id, budget: p.budget,
       committed: Math.round(committed), spent: Math.round(spent),
@@ -450,7 +454,10 @@ window.DB = (function () {
     const budgetTotal = projects.reduce((s,p)=>s+p.budget, 0);
     const spentTotal  = costs.reduce((s,c)=>s+c.spent, 0);
     const openRisks = risks.filter(r => r.status !== "Closed").length;
-    const utilization = 78;
+    // Utilization: average allocation across all engineers with active assignments
+    const assignedEmps = new Set(assignments.map(a => a.employee_id));
+    const totalAllocPct = assignments.reduce((s,a) => s + a.allocation_pct, 0);
+    const utilization = Math.round(totalAllocPct / (employees.length * 100) * 100);
     return {
       activeProjects: active.length, totalProjects: projects.length,
       budgetTotal, spentTotal,

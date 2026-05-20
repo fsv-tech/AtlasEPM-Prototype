@@ -317,22 +317,28 @@ function ScreenAnalytics() {
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
         <div className="card">
           <CardH title="Risk profile" subtitle="Open risks by severity"/>
+          {(() => {
+            const notClosed = DB.risks.filter(r => r.status !== "Closed");
+            const highCount = notClosed.filter(r => r.severity === "High").length;
+            const medCount  = notClosed.filter(r => r.severity === "Medium").length;
+            const lowCount  = notClosed.filter(r => r.severity === "Low").length;
+            return (
           <div className="row" style={{ gap: 18, alignItems: "center" }}>
             <Donut size={120} thickness={16} segments={[
-              { value: 4, color: "var(--red)" },
-              { value: 6, color: "var(--amber)" },
-              { value: 3, color: "var(--green)" },
+              { value: highCount, color: "var(--red)" },
+              { value: medCount,  color: "var(--amber)" },
+              { value: lowCount,  color: "var(--green)" },
             ]} gap={3}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.02em" }}>13</div>
+                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.02em" }}>{notClosed.length}</div>
                 <div className="muted xs">open</div>
               </div>
             </Donut>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
               {[
-                { l: "High", v: 4, c: "var(--red)"   },
-                { l: "Med",  v: 6, c: "var(--amber)" },
-                { l: "Low",  v: 3, c: "var(--green)" },
+                { l: "High", v: highCount, c: "var(--red)"   },
+                { l: "Med",  v: medCount,  c: "var(--amber)" },
+                { l: "Low",  v: lowCount,  c: "var(--green)" },
               ].map(s => (
                 <div key={s.l} className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
                   <div className="row" style={{ gap: 8 }}><span className="dot" style={{ background: s.c }}/>{s.l}</div>
@@ -341,23 +347,36 @@ function ScreenAnalytics() {
               ))}
             </div>
           </div>
+            );
+          })()}
         </div>
 
         <div className="card">
           <CardH title="Change request impact" subtitle="Cumulative net effect on portfolio"/>
-          <div style={{ fontSize: 24, fontWeight: 500, letterSpacing: "-0.025em" }}>+$418K</div>
-          <div className="muted tiny">across {DB.changes.length} change requests</div>
-          <hr className="divider" style={{ margin: "12px 0" }}/>
-          {[
-            { l: "Cost growth",      v: "+0.9%", c: "var(--amber)" },
-            { l: "Schedule slippage", v: "+12 d", c: "var(--amber)" },
-            { l: "Hours added",      v: "1,540 h", c: "var(--ink-3)" },
-          ].map(r => (
-            <div key={r.l} className="row" style={{ justifyContent: "space-between", fontSize: 12, padding: "4px 0" }}>
-              <span className="muted">{r.l}</span>
-              <span className="mono" style={{ color: r.c }}>{r.v}</span>
-            </div>
-          ))}
+          {(() => {
+            const activeChanges = DB.changes.filter(c => c.status !== "Rejected");
+            const netCost = activeChanges.reduce((s, c) => s + c.cost_impact, 0);
+            const netHours = DB.changes.reduce((s, c) => s + c.hours_impact, 0);
+            const netDays = activeChanges.reduce((s, c) => s + c.schedule_impact_days, 0);
+            const netCostStr = (netCost >= 0 ? "+" : "") + "$" + Math.abs(Math.round(netCost/1000)) + "K";
+            return (
+          <>
+            <div style={{ fontSize: 24, fontWeight: 500, letterSpacing: "-0.025em" }}>{netCostStr}</div>
+            <div className="muted tiny">across {DB.changes.length} change requests</div>
+            <hr className="divider" style={{ margin: "12px 0" }}/>
+            {[
+              { l: "Cost growth",       v: (netCost/activeChanges.reduce((s,c)=>s+Math.abs(c.cost_impact||0),1)*100).toFixed(1) + "%", c: netCost > 0 ? "var(--amber)" : "var(--green)" },
+              { l: "Schedule impact",   v: (netDays >= 0 ? "+" : "") + netDays + " d",   c: netDays > 0 ? "var(--amber)" : "var(--green)" },
+              { l: "Hours added",       v: (netHours >= 0 ? "+" : "") + netHours.toLocaleString() + " h", c: "var(--ink-3)" },
+            ].map(r => (
+              <div key={r.l} className="row" style={{ justifyContent: "space-between", fontSize: 12, padding: "4px 0" }}>
+                <span className="muted">{r.l}</span>
+                <span className="mono" style={{ color: r.c }}>{r.v}</span>
+              </div>
+            ))}
+          </>
+            );
+          })()}
         </div>
 
         <div className="card">

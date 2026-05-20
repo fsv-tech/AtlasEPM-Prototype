@@ -10,19 +10,27 @@ function ScreenDashboard({ role }) {
   const statusCount = DB.projects.reduce((acc, p) => { acc[p.status] = (acc[p.status]||0)+1; return acc; }, {});
   const healthCount = DB.projects.reduce((acc, p) => { acc[p.health] = (acc[p.health]||0)+1; return acc; }, {});
 
-  // Discipline utilization (synthetic)
+  // Discipline utilization — derived from assignments allocation_pct
+  const disciplineAssignments = {};
+  DB.assignments.forEach(a => {
+    const emp = DB.employeeById(a.employee_id);
+    if (!emp) return;
+    const disc = emp.discipline;
+    if (!disciplineAssignments[disc]) disciplineAssignments[disc] = { totalAlloc: 0, count: 0 };
+    disciplineAssignments[disc].totalAlloc += a.allocation_pct;
+    disciplineAssignments[disc].count += 1;
+  });
+
   const disciplineUtil = [
-    { name: "PM",              util: 64, color: U.disciplineColors.PM },
-    { name: "Process",         util: 82, color: U.disciplineColors.Process },
-    { name: "Mechanical",      util: 91, color: U.disciplineColors.Mechanical },
-    { name: "Electrical",      util: 76, color: U.disciplineColors.Electrical },
-    { name: "Instrumentation", util: 72, color: U.disciplineColors.Instrumentation },
-    { name: "Structural",      util: 80, color: U.disciplineColors.Structural },
-    { name: "HSE",             util: 56, color: U.disciplineColors.HSE },
-    { name: "Civil",           util: 62, color: U.disciplineColors.Civil },
-    { name: "Procurement",     util: 58, color: U.disciplineColors.Procurement },
-    { name: "Commercial",      util: 68, color: U.disciplineColors.Commercial },
-  ];
+    "PM","Process","Mechanical","Electrical","Instrumentation",
+    "Structural","HSE","Civil","Procurement","Commercial",
+  ].map(name => {
+    const d = disciplineAssignments[name] || { totalAlloc: 0, count: 0 };
+    // Average allocation across all engineers in this discipline
+    const empCount = DB.employees.filter(e => e.discipline === name).length;
+    const util = empCount > 0 ? Math.min(100, Math.round(d.totalAlloc / empCount)) : 0;
+    return { name, util, color: U.disciplineColors[name] };
+  });
 
   // Weekly burn — Last 12 weeks, K USD
   const burn = [128,142,158,176,168,184,201,194,212,224,238,252];
@@ -118,21 +126,28 @@ function ScreenDashboard({ role }) {
               </div>
             ))}
           </div>
+          {(() => {
+            const overloaded = disciplineUtil.filter(d => d.util > 85);
+            if (overloaded.length === 0) return null;
+            const top = overloaded.sort((a,b) => b.util - a.util)[0];
+            return (
           <div style={{ marginTop: 14, padding: "10px 12px", background: "var(--red-soft)", borderRadius: 8, fontSize: 12, color: "#9A1F1F", display: "flex", gap: 10, alignItems: "flex-start", borderLeft: "3px solid var(--red)" }}>
             <Ico name="alertTri" size={14} color="var(--red)"/>
-            <div style={{ flex: 1, lineHeight: 1.5 }}><b style={{ fontWeight: 600 }}>Mechanical at 91%</b> — overloaded for the next 2 weeks. Consider reassignment from <a style={{color:"#9A1F1F", textDecoration:"underline", fontWeight: 500}} href="#/calendar">resource calendar</a>.</div>
+            <div style={{ flex: 1, lineHeight: 1.5 }}><b style={{ fontWeight: 600 }}>{top.name} at {top.util}%</b> — overloaded. Consider reassignment from <a style={{color:"#9A1F1F", textDecoration:"underline", fontWeight: 500}} href="#/calendar">resource calendar</a>.</div>
           </div>
+            );
+          })()}
         </div>
 
         {/* Weekly burn */}
         <div className="card" data-tour-id="burn-rate">
-          <CardH title="Weekly burn rate" subtitle="K USD · last 12 weeks" action="Cost detail" onAction={() => navTo("cost")}/>
+          <CardH title="Weekly burn rate" subtitle="K USD · portfolio · last 12 weeks" action="Cost detail" onAction={() => navTo("cost")}/>
           <div style={{ display:"flex", alignItems:"baseline", justifyContent: "space-between", marginBottom: 10 }}>
             <div style={{ display:"flex", alignItems:"baseline", gap: 8 }}>
-              <span style={{ fontSize: 28, fontWeight: 500, letterSpacing: "-0.028em" }}>$252K</span>
+              <span style={{ fontSize: 28, fontWeight: 500, letterSpacing: "-0.028em" }}>${burn[burn.length-1]}K</span>
               <span className="muted tiny">this week</span>
             </div>
-            <span className="badge red" style={{ fontSize: 10 }}><Ico name="arrUp" size={10}/>+5.9% wow</span>
+            <span className="badge red" style={{ fontSize: 10 }}><Ico name="arrUp" size={10}/>+{((burn[burn.length-1]/burn[burn.length-2]-1)*100).toFixed(1)}% wow</span>
           </div>
           <Bars values={burn} labels={["W9","W10","W11","W12","W13","W14","W15","W16","W17","W18","W19","W20"]} w={340} h={110} barW={16} gap={6} highlight={11}
             colors={burn.map((_,i)=> i===11 ? "var(--accent)" : i >= 8 ? "var(--ink-6)" : "#E5E7EB")}/>
