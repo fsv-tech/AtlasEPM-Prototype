@@ -24,7 +24,7 @@ window.DB = (function () {
   const disciplineNames = [
     "PM", "Mechanical", "Electrical", "Instrumentation",
     "Structural", "HSE", "Operations", "Procurement",
-    "Civil", "Process", "Commercial", "Architecture",
+    "Civil", "Process", "Commercial", "Architecture", "DocCtrl",
   ];
 
   // ============================================

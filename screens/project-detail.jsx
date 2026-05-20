@@ -244,6 +244,7 @@ function ProjectTeam({ p, team }) {
         <tbody>
           {team.map((a, i) => {
             const e = DB.employeeById(a.employee_id);
+            if (!e) return null;
             return (
               <tr key={i} onClick={() => navTo("employees/" + e.employee_id)}>
                 <td>
@@ -372,6 +373,7 @@ function ProjectDisciplines({ p, disc }) {
             <div className="grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
               {team.map(a => {
                 const e = DB.employeeById(a.employee_id);
+                if (!e) return null;
                 return (
                   <div key={a.employee_id} className="row" style={{ gap: 10, padding: 10, background: "var(--surface-2)", borderRadius: 8 }}
                        onClick={() => navTo("employees/"+e.employee_id)}>

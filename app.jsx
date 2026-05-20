@@ -2,6 +2,25 @@
 // Atlas — App root + route dispatch
 // ============================================
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("Atlas render error:", error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 40, fontFamily: "var(--font-sans, system-ui)" }}>
+          <h2 style={{ color: "var(--red, #dc2626)", marginBottom: 8 }}>Something went wrong</h2>
+          <p style={{ color: "var(--ink-3, #64748b)", fontSize: 14, marginBottom: 16 }}>{this.state.error.message}</p>
+          <button style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid var(--line, #e2e8f0)", cursor: "pointer" }}
+            onClick={() => this.setState({ error: null })}>Try again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   const r = useRoute();
   const [role, setRole] = React.useState(() => {
@@ -61,4 +80,4 @@ function App() {
 }
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App/>);
+root.render(<ErrorBoundary><App/></ErrorBoundary>);
