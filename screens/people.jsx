@@ -162,8 +162,14 @@ function ScreenEmployeeDetail({ employeeId }) {
   const allocation = projectsOn.reduce((s,a)=>s+a.allocation_pct,0);
   const deliverablesOwned = DB.deliverables.filter(d => d.owner_employee_id === e.employee_id);
 
-  // synthetic utilization over 12 weeks
-  const utilHistory = [72,78,80,86,90,88,92,94,96,98,allocation,allocation];
+  // Utilization history derived from allocations for this employee (planned hours / 40 * 100)
+  const utilHistory = DB.planningWeeks.slice(-12).map(w => {
+    const weekAllocs = DB.allocations.filter(a => a.employee_id === e.employee_id && a.week === w.week && a.year === w.year);
+    const totalHrs = weekAllocs.reduce((s, a) => s + (a.actual_hours !== null ? a.actual_hours : a.planned_hours), 0);
+    return Math.min(120, Math.round((totalHrs / 40) * 100));
+  });
+  // Fallback: if no allocation data, use assignment-derived value for all weeks
+  const utilFallback = utilHistory.every(v => v === 0) ? Array(12).fill(allocation) : utilHistory;
 
   return (
     <div className="content" data-tour-id="page">
@@ -295,11 +301,11 @@ function ScreenEmployeeDetail({ employeeId }) {
         <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div className="card">
             <CardH title="Utilization trend" subtitle="12-week rolling"/>
-            <Bars w={500} h={120} barW={28} gap={6} values={utilHistory}
-                  labels={Array.from({length:12}, (_,i)=>"W"+(9+i))}
-                  colors={utilHistory.map(v => v > 100 ? "var(--red)" : v > 80 ? "var(--amber)" : "var(--accent)")}/>
+            <Bars w={500} h={120} barW={28} gap={6} values={utilFallback}
+                  labels={DB.planningWeeks.slice(-12).map(w => w.label)}
+                  colors={utilFallback.map(v => v > 100 ? "var(--red)" : v > 80 ? "var(--amber)" : "var(--accent)")}/>
             <div className="muted tiny" style={{ marginTop: 8 }}>
-              {e.full_name.split(" ")[0]} has averaged 88% utilization over the last 12 weeks · slightly above the 80% target.
+              {e.full_name.split(" ")[0]} has averaged {Math.round(utilFallback.reduce((s,v)=>s+v,0)/utilFallback.length)}% utilization over the last 12 weeks.
             </div>
           </div>
           <div className="card">

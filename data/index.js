@@ -450,7 +450,13 @@ window.DB = (function () {
     const budgetTotal = projects.reduce((s,p)=>s+p.budget, 0);
     const spentTotal  = costs.reduce((s,c)=>s+c.spent, 0);
     const openRisks = risks.filter(r => r.status !== "Closed").length;
-    const utilization = 78;
+    // Compute utilization: sum of allocation_pct across all active assignments / (employees * 100)
+    // Only count assignments on active/planning projects
+    const activeProjectIds = new Set(active.map(p => p.project_id));
+    const totalAllocPct = assignments
+      .filter(a => activeProjectIds.has(a.project_id))
+      .reduce((s, a) => s + a.allocation_pct, 0);
+    const utilization = Math.round(totalAllocPct / employees.length);
     return {
       activeProjects: active.length, totalProjects: projects.length,
       budgetTotal, spentTotal,

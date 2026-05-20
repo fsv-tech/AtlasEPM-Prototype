@@ -230,7 +230,7 @@ function ProjectOverview({ p, cost, disc, dels, risksList, milestones }) {
 // =========================================================
 function ProjectTeam({ p, team }) {
   return (
-    <div className="card flush">
+    <div className="card flush table-wrap">
       <div className="table-head">
         <div className="table-head-l">
           <h3 className="card-title">Team — {team.length} members</h3>
