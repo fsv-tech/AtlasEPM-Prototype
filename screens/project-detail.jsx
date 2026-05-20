@@ -229,8 +229,9 @@ function ProjectOverview({ p, cost, disc, dels, risksList, milestones }) {
 // TEAM TAB
 // =========================================================
 function ProjectTeam({ p, team }) {
+  const [createOpen, setCreateOpen] = React.useState(false);
   return (
-    <div className="card flush table-wrap">
+    <div className="card flush">
       <div className="table-head">
         <div className="table-head-l">
           <h3 className="card-title">Team — {team.length} members</h3>
