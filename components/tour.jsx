@@ -23,6 +23,8 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
       }
     }
 
+    if (!step.selector) setRect(null);
+
     setAnimating(true);
     const animOff = setTimeout(() => setAnimating(false), 560);
 
@@ -544,7 +546,7 @@ const ATLAS_TOUR_STEPS = [
   },
 
   // —— Wrap up ————————————————————————————————
-  { route: "dashboard", eyebrow: "That's the tour", icon: "checkCircle", section: "Done", color: "#10B981",
+  { eyebrow: "That's the tour", icon: "checkCircle", section: "Done", color: "#10B981",
     title: "You've seen every section",
     body: "Atlas covers project, resource, deliverable, cost, risk, change, approval, reporting and analytics — replacing the spreadsheet workflow end-to-end. The docs folder has the full plan to turn this prototype into a deployed product.",
     bullets: ["Click Tour any time to replay", "Try switching roles to see how the platform changes", "Open docs/PROJECT_PLAN.md for the build plan"],
