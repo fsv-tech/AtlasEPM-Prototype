@@ -110,32 +110,15 @@ function ScreenReports() {
 function ScreenAnalytics() {
   const months = ["Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"];
 
-  // KPIs derived from real data
-  // Billable hours YTD: sum of actual_hours from past allocations
-  const billable = Math.round(DB.allocations
-    .filter(a => a.actual_hours !== null)
-    .reduce((s, a) => s + a.actual_hours, 0));
-  // Billable target: total planned hours across all past weeks
-  const billableTarget = Math.round(DB.allocations
-    .filter(a => a.actual_hours !== null)
-    .reduce((s, a) => s + a.planned_hours, 0) * 1.2); // 1.2x = full-year projection
-  // Revenue YTD: sum of spent across active projects costs
-  const revenue = DB.costs.reduce((s, c) => s + c.spent, 0);
-  // Avg billable rate: total revenue YTD / billable hours
-  const avgRate = billable > 0 ? Math.round(revenue / billable) : 0;
-  // On-time delivery: deliverables with actual_date <= planned_date / all completed
-  const completedDels = DB.deliverables.filter(d => d.actual_date);
-  const onTimeRate = completedDels.length > 0
-    ? Math.round(completedDels.filter(d => d.actual_date <= d.planned_date).length / completedDels.length * 100)
-    : 0;
-  // Avg cost variance: mean of |forecast - budget| / budget across all projects
-  const avgVariance = (DB.costs.reduce((s, c) => {
-    const p = DB.projectById(c.project_id);
-    return s + Math.abs(c.forecast - c.budget) / c.budget * 100;
-  }, 0) / DB.costs.length).toFixed(1);
-  // Win rate & repeat clients remain indicative (no bid data in the dataset)
-  const winRate = 67;
-  const repeatClients = 73;
+  // Synthetic but plausible metrics
+  const billable = 13560;      // hours YTD
+  const billableTarget = 18000;
+  const revenue   = 4_240_000; // USD YTD
+  const avgRate   = 88;
+  const winRate   = 67;
+  const onTimeRate = 82;
+  const avgVariance = 1.4;     // %
+  const repeatClients = 73;    // %
 
   return (
     <div className="content" data-tour-id="page">
@@ -238,45 +221,22 @@ function ScreenAnalytics() {
           </div>
           <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
             <span className="muted">Best performer</span>
-            <span className="mono">{(() => {
-              const best = DB.projects.reduce((b, p) => {
-                const c = DB.costs.find(c => c.project_id === p.project_id);
-                if (!c) return b;
-                const v = (c.forecast - c.budget) / c.budget * 100;
-                return (!b || v < b.v) ? { code: p.project_code, v } : b;
-              }, null);
-              return best ? `${best.code} (${best.v.toFixed(1)}%)` : "—";
-            })()}</span>
+            <span className="mono">BRB-022 (-1.8%)</span>
           </div>
           <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
             <span className="muted">Worst performer</span>
-            <span className="mono" style={{ color: "var(--red)" }}>{(() => {
-              const worst = DB.projects.reduce((b, p) => {
-                const c = DB.costs.find(c => c.project_id === p.project_id);
-                if (!c) return b;
-                const v = (c.forecast - c.budget) / c.budget * 100;
-                return (!b || v > b.v) ? { code: p.project_code, v } : b;
-              }, null);
-              return worst ? `${worst.code} (+${worst.v.toFixed(1)}%)` : "—";
-            })()}</span>
+            <span className="mono" style={{ color: "var(--red)" }}>WTP-505 (+8.0%)</span>
           </div>
         </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <div className="card">
-          <CardH title="Hours by discipline (YTD)" subtitle="Planned hours across all projects"/>
-          {(() => {
-            const discOrder = ["Mechanical","Electrical","Instrumentation","Structural","PM","HSE","Civil","Procurement","Commercial","Process"];
-            const discColors = { Mechanical:"#2563EB",Electrical:"#F59E0B",Instrumentation:"#8B5CF6",Structural:"#0EA5E9",PM:"#10B981",HSE:"#65A30D",Civil:"#EC4899",Procurement:"#475569",Commercial:"#0D9488",Process:"#9333EA" };
-            const discHours = {};
-            DB.disciplines.forEach(d => { discHours[d.name] = (discHours[d.name]||0) + d.planned_hours; });
-            const labels = discOrder.filter(n => discHours[n]);
-            const values = labels.map(n => discHours[n]);
-            const colors = labels.map(n => discColors[n] || "#94A3B8");
-            return <Bars h={150} barW={32} gap={10} values={values} labels={labels.map(n=>n.slice(0,5))} colors={colors}/>;
-          })()}
-        </div>
+          <CardH title="Hours by discipline (YTD)" subtitle="2026 — total billable hours"/>
+          <Bars h={150} barW={32} gap={10}
+                values={[3400,1850,1600,1450,720,720,540,480]}
+                labels={["Mech","Elec","Instr.","Struct","HSE","Civil","Proc","Comm"]}
+                colors={["#2563EB","#F59E0B","#8B5CF6","#0EA5E9","#10B981","#65A30D","#EC4899","#475569"]}/>
         </div>
         <div className="card">
           <CardH title="Staff demand forecast" subtitle="Next 6 months (FTE equivalent)"/>

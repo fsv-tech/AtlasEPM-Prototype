@@ -345,7 +345,7 @@ const ATLAS_TOUR_STEPS = [
     title: "Overview KPIs",
     body: "Progress, hours consumed vs plan, remaining budget, late deliverables, open risks. Each tile drills into the matching tab below.",
   },
-  { route: "projects/P-001/team", selector: ".table-wrap", eyebrow: "Project · Team", icon: "users", section: "Plan", color: C.plan,
+  { route: "projects/P-001/team", selector: ".card.flush", eyebrow: "Project · Team", icon: "users", section: "Plan", color: C.plan,
     title: "Team & allocations",
     body: "Every engineer assigned with their discipline, role on this project, allocation %, and period. Allocation bar turns red over 80% so you can spot bottlenecks.",
   },

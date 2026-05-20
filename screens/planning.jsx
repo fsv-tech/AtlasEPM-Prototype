@@ -102,30 +102,10 @@ function ScreenCost() {
   const totalForecast = DB.costs.reduce((s,c)=>s+c.forecast, 0);
   const totalCommitted = DB.costs.reduce((s,c)=>s+c.committed, 0);
 
-  // Monthly burn derived from allocations data — aggregate weekly costs into months (M USD)
-  // Build a map of year-month -> total cost from allocations
-  const monthCostMap = {};
-  DB.planningWeeks.forEach(w => {
-    const key = w.year + "-" + String(new Date(w.start + "T00:00:00Z").getUTCMonth() + 1).padStart(2,"0");
-    if (!monthCostMap[key]) monthCostMap[key] = 0;
-    const weekAllocs = DB.allocations.filter(a => a.week === w.week && a.year === w.year);
-    weekAllocs.forEach(a => {
-      const emp = DB.employeeById(a.employee_id);
-      if (!emp) return;
-      const hrs = a.actual_hours !== null ? a.actual_hours : a.planned_hours;
-      monthCostMap[key] += (hrs * emp.hourly_rate) / 1e6; // M USD
-    });
-  });
-  // Sort and pad to fill from project start; use 10 months ending at current month
-  const sortedMonthKeys = Object.keys(monthCostMap).sort();
-  const months = sortedMonthKeys.map(k => {
-    const [yr, mo] = k.split("-");
-    const d = new Date(Number(yr), Number(mo)-1, 1);
-    const label = d.toLocaleString("en-US",{month:"short"});
-    return Number(yr) === 2025 ? label + " 25" : label;
-  });
-  const burnByMonth = sortedMonthKeys.map(k => Math.round(monthCostMap[k] * 10) / 10);
-  const cumulative  = burnByMonth.reduce((acc, v) => { acc.push(Math.round(((acc[acc.length-1]||0) + v) * 10)/10); return acc; }, []);
+  // Monthly burn (synthetic across all projects)
+  const months = ["Aug 25","Sep","Oct","Nov","Dec","Jan 26","Feb","Mar","Apr","May"];
+  const burnByMonth = [1.2,1.4,1.6,1.8,2.1,2.4,2.6,2.8,3.0,3.2];
+  const cumulative  = burnByMonth.reduce((acc, v) => { acc.push((acc[acc.length-1]||0) + v); return acc; }, []);
 
   return (
     <div className="content" data-tour-id="page">
