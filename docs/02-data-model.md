@@ -329,6 +329,58 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX audit_entity_idx ON audit_events(entity_type, entity_id);
 
+-- ---------- Meetings / Minutes of Meeting ----------
+-- A meeting tagged to a project; attendees with present-status trigger
+-- automatic daily-log entries (see auto_log_entries below).
+CREATE TYPE meeting_attendance AS ENUM ('present', 'apologies', 'absent');
+
+CREATE TABLE meetings (
+  meeting_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id        uuid NOT NULL REFERENCES projects(project_id),
+  title             text NOT NULL,
+  meeting_type      text NOT NULL,         -- 'Steerco', 'Standup', 'HAZOP', etc.
+  scheduled_at      timestamptz NOT NULL,
+  duration_minutes  int NOT NULL DEFAULT 60,
+  location          text,
+  chair_employee_id uuid REFERENCES employees(employee_id),
+  agenda            text[] DEFAULT '{}',
+  notes             text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  created_by        uuid REFERENCES employees(employee_id),
+  updated_at        timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX meetings_project_idx ON meetings (project_id, scheduled_at DESC);
+
+CREATE TABLE meeting_attendees (
+  meeting_id   uuid NOT NULL REFERENCES meetings(meeting_id) ON DELETE CASCADE,
+  employee_id  uuid NOT NULL REFERENCES employees(employee_id),
+  attendance   meeting_attendance NOT NULL DEFAULT 'present',
+  role         text,                          -- 'Chair', 'Mech Lead', etc.
+  PRIMARY KEY (meeting_id, employee_id)
+);
+CREATE INDEX meeting_attendees_emp_idx ON meeting_attendees (employee_id);
+
+CREATE TABLE meeting_decisions (
+  decision_id    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id     uuid NOT NULL REFERENCES meetings(meeting_id) ON DELETE CASCADE,
+  text           text NOT NULL,
+  owner          uuid REFERENCES employees(employee_id),
+  due            date
+);
+
+CREATE TABLE meeting_actions (
+  action_id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  meeting_id     uuid NOT NULL REFERENCES meetings(meeting_id) ON DELETE CASCADE,
+  text           text NOT NULL,
+  owner          uuid REFERENCES employees(employee_id),
+  due            date,
+  status         text NOT NULL DEFAULT 'Open'  -- 'Open' | 'In Progress' | 'Done'
+);
+
+-- Trigger: when a meeting is created with present-status attendees,
+-- auto-insert daily_log_entries with type='meeting' and meeting_id set.
+-- The trigger lives in db/migrations/NNNN_mom_auto_log.sql.
+
 -- ---------- Daily Log ----------
 -- Per-engineer time-stamped activity log. Each entry can tie to a project
 -- and optionally a specific deliverable. Drives the auto-generated weekly
@@ -341,6 +393,7 @@ CREATE TABLE daily_log_entries (
   employee_id     uuid NOT NULL REFERENCES employees(employee_id),
   project_id      uuid REFERENCES projects(project_id),
   deliverable_id  uuid REFERENCES deliverables(deliverable_id),
+  meeting_id      uuid REFERENCES meetings(meeting_id),
   entry_type      log_entry_type NOT NULL,
   title           text NOT NULL,
   body            text,
@@ -348,12 +401,17 @@ CREATE TABLE daily_log_entries (
   tags            text[] DEFAULT '{}',
   -- links/emails: array of { kind: 'url'|'email', label, value } as jsonb
   links           jsonb DEFAULT '[]'::jsonb,
+  -- distinguishes the auto-generated stub vs. user-edited copy
+  auto_generated  boolean NOT NULL DEFAULT false,
   created_at      timestamptz NOT NULL DEFAULT now(),
-  updated_at      timestamptz NOT NULL DEFAULT now()
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+  -- One auto-stub OR one user-edited entry per (employee, meeting) — never both
+  UNIQUE (employee_id, meeting_id)
 );
 CREATE INDEX daily_log_emp_date_idx ON daily_log_entries (employee_id, created_at DESC);
 CREATE INDEX daily_log_project_idx   ON daily_log_entries (project_id, created_at DESC);
 CREATE INDEX daily_log_deliverable_idx ON daily_log_entries (deliverable_id) WHERE deliverable_id IS NOT NULL;
+CREATE INDEX daily_log_meeting_idx ON daily_log_entries (meeting_id) WHERE meeting_id IS NOT NULL;
 CREATE INDEX daily_log_type_idx      ON daily_log_entries (entry_type);
 
 -- RLS: an engineer can read/write their own entries; PM + Discipline Lead

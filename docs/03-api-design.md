@@ -130,6 +130,34 @@ summary{ totalHours, totalEntries, totalBlockers, ... } }` where each project
 group contains separate buckets for `highlights` (work), `blockers`,
 `communications`, `meetings`, `notes`, plus touched deliverables.
 
+### Meetings / Minutes of Meeting
+A meeting creates auto-log entries in each present attendee's daily log.
+Engineers add personal notes on top of the auto-stub — those notes feed
+into their weekly report.
+
+```
+GET    /projects/{id}/meetings                                   # list MoMs on a project
+POST   /projects/{id}/meetings                                   # create — triggers auto-log entries for present attendees
+GET    /meetings/{id}                                            # fetch MoM with agenda, attendees, decisions, actions
+PATCH  /meetings/{id}                                            # edit MoM — adds/removes attendees re-trigger auto-log
+DELETE /meetings/{id}                                            # cascades to attendee auto-log stubs (preserves user-edited entries with meeting_id retained but soft-disconnected)
+
+POST   /meetings/{id}/attendees                                  # add attendee — creates auto-log stub
+DELETE /meetings/{id}/attendees/{employee_id}                    # remove attendee — removes auto-log stub
+PATCH  /meetings/{id}/attendees/{employee_id}                    # change attendance (Present/Apologies/Absent)
+
+POST   /meetings/{id}/actions                                    # add action item
+PATCH  /actions/{action_id}                                      # update status (Open / In Progress / Done)
+```
+
+**Auto-logging behaviour:** when a meeting is created (or attendee added), a
+`daily_log_entries` row is inserted with `auto_generated=true`, `meeting_id`
+set, `entry_type='meeting'`, `hours = duration_minutes / 60`, and a
+placeholder body. When the engineer opens the entry and saves personal notes,
+the row's `auto_generated` flag flips to `false` and the body is replaced
+with their own text. The `meeting_id` is preserved so the MoM detail view
+can still surface their notes alongside the meeting.
+
 ### Reports & analytics
 
 ```

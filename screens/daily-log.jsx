@@ -212,7 +212,9 @@ function EntryRow({ entry, onEdit }) {
   const meta = entryTypeMeta(entry.entry_type);
   const proj = entry.project_id ? DB.projectById(entry.project_id) : null;
   const del  = entry.deliverable_id ? DB.deliverableById(entry.deliverable_id) : null;
+  const meeting = entry.meeting_id ? DB.meetingById(entry.meeting_id) : null;
   const time = entry.created_at.slice(11, 16);
+  const isAuto = !!entry.auto_generated;
 
   return (
     <div
@@ -228,9 +230,11 @@ function EntryRow({ entry, onEdit }) {
         borderBottom: "1px solid var(--line)",
         position: "relative",
         transition: "background var(--dur-fast) var(--ease-out)",
+        background: isAuto ? "linear-gradient(90deg, var(--violet-soft) 0%, transparent 60%)" : null,
+        borderLeft: isAuto ? "3px solid var(--violet)" : null,
       }}
-      onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
-      onMouseLeave={e => e.currentTarget.style.background = ""}
+      onMouseEnter={e => e.currentTarget.style.background = isAuto ? "linear-gradient(90deg, var(--violet-soft) 0%, var(--surface-2) 60%)" : "var(--surface-2)"}
+      onMouseLeave={e => e.currentTarget.style.background = isAuto ? "linear-gradient(90deg, var(--violet-soft) 0%, transparent 60%)" : ""}
     >
       <div className="mono" style={{ fontSize: 11, color: "var(--ink-4)", paddingTop: 3, textAlign: "right" }}>{time}</div>
       <div style={{
@@ -245,6 +249,11 @@ function EntryRow({ entry, onEdit }) {
       <div style={{ minWidth: 0 }}>
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13.5, fontWeight: 500, color: "var(--ink)" }}>{entry.title}</span>
+          {isAuto && (
+            <span className="badge" style={{ background: "var(--violet)", color: "#fff", fontSize: 10, fontWeight: 500 }}>
+              <Ico name="zap" size={10}/>Auto from MoM
+            </span>
+          )}
           {entry.hours != null && (
             <span className="badge" style={{ background: "var(--surface-3)", color: "var(--ink-2)", fontSize: 10.5 }}>
               <Ico name="clock" size={10}/>{entry.hours}h
@@ -263,9 +272,15 @@ function EntryRow({ entry, onEdit }) {
               <Ico name="fileText" size={10}/>{del.deliverable_code}
             </a>
           )}
+          {meeting && !isAuto && (
+            <a className="badge outline" href={`#/projects/${meeting.project_id}/minutes/${meeting.meeting_id}`} onClick={ev => ev.stopPropagation()}
+               style={{ fontSize: 10.5, textDecoration: "none", borderColor: "var(--violet)", color: "var(--violet)" }}>
+              <Ico name="users" size={10}/>MoM
+            </a>
+          )}
         </div>
         {entry.body && (
-          <div style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.5 }}>{entry.body}</div>
+          <div style={{ fontSize: 12.5, color: isAuto ? "var(--ink-4)" : "var(--ink-3)", marginTop: 4, lineHeight: 1.5, fontStyle: isAuto ? "italic" : "normal" }}>{entry.body}</div>
         )}
         {(entry.links?.length > 0 || entry.tags?.length > 0) && (
           <div className="row" style={{ gap: 6, marginTop: 6, flexWrap: "wrap" }}>
@@ -285,8 +300,8 @@ function EntryRow({ entry, onEdit }) {
         )}
       </div>
       <div style={{ display: "flex", gap: 4, opacity: 0.6 }}>
-        <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={ev => { ev.stopPropagation(); onEdit(); }} title="Edit entry">
-          <Ico name="edit" size={12}/>
+        <button className="icon-btn" style={{ width: 26, height: 26 }} onClick={ev => { ev.stopPropagation(); onEdit(); }} title={isAuto ? "Add your notes" : "Edit entry"}>
+          <Ico name={isAuto ? "plus" : "edit"} size={12}/>
         </button>
       </div>
     </div>
@@ -295,20 +310,26 @@ function EntryRow({ entry, onEdit }) {
 
 // ============================================
 // EntryComposer — modal for creating/editing entries
+// Special handling for auto-generated meeting entries: the MoM metadata is
+// shown as read-only context, the engineer adds personal notes on top.
 // ============================================
 function EntryComposer({ employeeId, empProjects, editing, onClose }) {
   const isEditing = !!editing;
+  const isAutoMeeting = editing && editing.auto_generated;
+  const linkedMeeting = editing?.meeting_id ? DB.meetingById(editing.meeting_id) : null;
+
   const [type, setType]               = React.useState(editing?.entry_type || "work");
   const [projectId, setProjectId]     = React.useState(editing?.project_id || (empProjects[0]?.project_id || ""));
   const [deliverableId, setDeliverableId] = React.useState(editing?.deliverable_id || "");
   const [title, setTitle]             = React.useState(editing?.title || "");
-  const [body, setBody]               = React.useState(editing?.body || "");
+  // For auto-meeting entries, the body starts empty — engineer types their own notes
+  const [body, setBody]               = React.useState(isAutoMeeting ? "" : (editing?.body || ""));
   const [hours, setHours]             = React.useState(editing?.hours ?? "");
-  const [tagsText, setTagsText]       = React.useState((editing?.tags || []).join(", "));
+  const [tagsText, setTagsText]       = React.useState((editing?.tags || []).filter(t => t !== "auto").join(", "));
   const [linksText, setLinksText]     = React.useState((editing?.links || []).map(l => `${l.label}|${l.value}`).join("\n"));
   const toast = useToast();
 
-  // Deliverables on the chosen project, scoped to disciplines this employee can own
+  // Deliverables on the chosen project
   const projectDeliverables = React.useMemo(() => {
     if (!projectId) return [];
     return DB.deliverables.filter(d => d.project_id === projectId).sort((a, b) => a.deliverable_code.localeCompare(b.deliverable_code));
@@ -319,102 +340,164 @@ function EntryComposer({ employeeId, empProjects, editing, onClose }) {
       toast("A title is required.", "warn");
       return;
     }
-    toast(isEditing ? "Entry updated · timestamp preserved." : "Entry saved · " + new Date().toLocaleTimeString(), "success");
+    if (isAutoMeeting) {
+      toast("Personal notes saved to meeting · " + linkedMeeting.title, "success");
+    } else {
+      toast(isEditing ? "Entry updated · timestamp preserved." : "Entry saved · " + new Date().toLocaleTimeString(), "success");
+    }
     onClose();
   }
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 580 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 600 }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 500, letterSpacing: "-0.015em" }}>
-              {isEditing ? "Edit log entry" : "New log entry"}
+              {isAutoMeeting ? "Add your notes to meeting"
+                : isEditing ? "Edit log entry"
+                : "New log entry"}
             </h3>
             <div className="muted tiny" style={{ marginTop: 2 }}>
-              {isEditing
-                ? `Originally logged ${new Date(editing.created_at).toLocaleString()}`
-                : "Time stamped " + new Date().toLocaleString()}
+              {isAutoMeeting
+                ? `Auto-logged from MoM · ${new Date(editing.created_at).toLocaleString()}`
+                : isEditing
+                  ? `Originally logged ${new Date(editing.created_at).toLocaleString()}`
+                  : "Time stamped " + new Date().toLocaleString()}
             </div>
           </div>
           <button className="icon-btn" onClick={onClose}><Ico name="x" size={14}/></button>
         </div>
 
+        {/* If this entry is linked to a meeting, show the MoM context */}
+        {linkedMeeting && (
+          <div style={{
+            padding: "12px 20px",
+            background: "var(--violet-soft)",
+            borderBottom: "1px solid var(--line)",
+          }}>
+            <div className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: "var(--violet)", color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <Ico name="users" size={13}/>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="row" style={{ gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>{linkedMeeting.title}</span>
+                  <span className="badge" style={{ fontSize: 10, background: "var(--violet)", color: "#fff" }}>{linkedMeeting.meeting_type}</span>
+                </div>
+                <div className="muted tiny" style={{ marginTop: 2 }}>
+                  {new Date(linkedMeeting.scheduled_at).toLocaleString()} · {linkedMeeting.duration_minutes}min · {linkedMeeting.location}
+                </div>
+                {editing?.role_in_meeting && (
+                  <div className="muted tiny" style={{ marginTop: 2 }}>
+                    Your role: <b style={{ color: "var(--ink-2)" }}>{editing.role_in_meeting}</b>
+                  </div>
+                )}
+                {linkedMeeting.notes && (
+                  <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 6, padding: 8, background: "var(--surface)", borderRadius: 5, lineHeight: 1.5 }}>
+                    <div className="muted xs" style={{ letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 500, marginBottom: 3 }}>MoM Summary</div>
+                    {linkedMeeting.notes}
+                  </div>
+                )}
+                <a href={`#/projects/${linkedMeeting.project_id}/minutes/${linkedMeeting.meeting_id}`}
+                   onClick={onClose}
+                   style={{ fontSize: 11, color: "var(--violet)", display: "inline-flex", alignItems: "center", gap: 4, marginTop: 6, textDecoration: "none" }}>
+                  <Ico name="arrRight" size={11}/>View full MoM
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Entry type picker */}
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-3)", display: "block", marginBottom: 6 }}>TYPE</label>
-            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-              {ENTRY_TYPES.map(t => (
-                <button
-                  key={t.value}
-                  className={"chip" + (type === t.value ? " active" : "")}
-                  onClick={() => setType(t.value)}
-                  style={type === t.value ? { background: t.color, borderColor: t.color } : {}}
-                >
-                  <Ico name={t.icon} size={11}/>{t.label}
-                </button>
-              ))}
-            </div>
-            <div className="muted tiny" style={{ marginTop: 4 }}>{entryTypeMeta(type).description}</div>
-          </div>
-
-          {/* Project + deliverable */}
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div className="field">
-              <label>PROJECT</label>
-              <select value={projectId} onChange={e => { setProjectId(e.target.value); setDeliverableId(""); }}>
-                <option value="">— No project —</option>
-                {empProjects.map(p => (
-                  <option key={p.project_id} value={p.project_id}>{p.project_code} — {p.project_name}</option>
+          {/* Entry type picker — hidden for auto-meeting entries since type is fixed */}
+          {!linkedMeeting && (
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-3)", display: "block", marginBottom: 6 }}>TYPE</label>
+              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                {ENTRY_TYPES.map(t => (
+                  <button
+                    key={t.value}
+                    className={"chip" + (type === t.value ? " active" : "")}
+                    onClick={() => setType(t.value)}
+                    style={type === t.value ? { background: t.color, borderColor: t.color } : {}}
+                  >
+                    <Ico name={t.icon} size={11}/>{t.label}
+                  </button>
                 ))}
-              </select>
+              </div>
+              <div className="muted tiny" style={{ marginTop: 4 }}>{entryTypeMeta(type).description}</div>
             </div>
+          )}
+
+          {/* Project + deliverable — locked for meeting-linked entries */}
+          {!linkedMeeting && (
+            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="field">
+                <label>PROJECT</label>
+                <select value={projectId} onChange={e => { setProjectId(e.target.value); setDeliverableId(""); }}>
+                  <option value="">— No project —</option>
+                  {empProjects.map(p => (
+                    <option key={p.project_id} value={p.project_id}>{p.project_code} — {p.project_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>DELIVERABLE (optional)</label>
+                <select value={deliverableId} onChange={e => setDeliverableId(e.target.value)} disabled={!projectId || projectDeliverables.length === 0}>
+                  <option value="">— No specific deliverable —</option>
+                  {projectDeliverables.map(d => (
+                    <option key={d.deliverable_id} value={d.deliverable_id}>{d.deliverable_code} — {d.title.slice(0, 40)}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* Title — locked for meeting-linked entries */}
+          {!linkedMeeting && (
             <div className="field">
-              <label>DELIVERABLE (optional)</label>
-              <select value={deliverableId} onChange={e => setDeliverableId(e.target.value)} disabled={!projectId || projectDeliverables.length === 0}>
-                <option value="">— No specific deliverable —</option>
-                {projectDeliverables.map(d => (
-                  <option key={d.deliverable_id} value={d.deliverable_id}>{d.deliverable_code} — {d.title.slice(0, 40)}</option>
-                ))}
-              </select>
+              <label>TITLE</label>
+              <input
+                type="text"
+                autoFocus
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                placeholder={
+                  type === "blocker" ? "What's blocking you?" :
+                  type === "comm"    ? "Who did you communicate with?" :
+                  type === "meeting" ? "Meeting name" :
+                  type === "note"    ? "Quick reminder…" :
+                  "What did you work on?"
+                }
+              />
             </div>
-          </div>
+          )}
 
-          {/* Title */}
+          {/* Body / personal notes */}
           <div className="field">
-            <label>TITLE</label>
-            <input
-              type="text"
-              autoFocus
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder={
-                type === "blocker" ? "What's blocking you?" :
-                type === "comm"    ? "Who did you communicate with?" :
-                type === "meeting" ? "Meeting name" :
-                type === "note"    ? "Quick reminder…" :
-                "What did you work on?"
-              }
-            />
-          </div>
-
-          {/* Body */}
-          <div className="field">
-            <label>NOTES (optional)</label>
+            <label>{linkedMeeting ? "YOUR PERSONAL NOTES & FOLLOW-UPS" : "NOTES (optional)"}</label>
             <textarea
+              autoFocus={!!linkedMeeting}
               value={body}
               onChange={e => setBody(e.target.value)}
-              placeholder="Details, context, decisions made, next steps…"
-              rows={3}
+              placeholder={
+                linkedMeeting
+                  ? "Your own observations, action items, things to follow up on…"
+                  : "Details, context, decisions made, next steps…"
+              }
+              rows={linkedMeeting ? 5 : 3}
               style={{ resize: "vertical", fontFamily: "inherit" }}
             />
+            {linkedMeeting && (
+              <div className="hint">These are your personal notes — separate from the official MoM. Only you can see them.</div>
+            )}
           </div>
 
           {/* Hours + Tags */}
           <div className="grid" style={{ gridTemplateColumns: "1fr 2fr", gap: 12 }}>
             <div className="field">
-              <label>HOURS {type !== "work" && type !== "meeting" ? "(optional)" : ""}</label>
+              <label>HOURS {linkedMeeting && " (from meeting duration)"}{!linkedMeeting && type !== "work" && type !== "meeting" ? " (optional)" : ""}</label>
               <input
                 type="number"
                 step="0.25"
@@ -423,6 +506,7 @@ function EntryComposer({ employeeId, empProjects, editing, onClose }) {
                 value={hours}
                 onChange={e => setHours(e.target.value)}
                 placeholder="0.0"
+                disabled={!!linkedMeeting}
               />
             </div>
             <div className="field">
@@ -452,12 +536,12 @@ function EntryComposer({ employeeId, empProjects, editing, onClose }) {
 
         <div style={{ padding: "12px 20px", borderTop: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--surface-2)" }}>
           <div className="muted tiny">
-            {isEditing ? "Editing preserves original timestamp" : "Will be saved with current timestamp"}
+            {isAutoMeeting ? "Saving will preserve the meeting link" : isEditing ? "Editing preserves original timestamp" : "Will be saved with current timestamp"}
           </div>
           <div className="row" style={{ gap: 8 }}>
             <button className="btn" onClick={onClose}>Cancel</button>
             <button className="btn primary" onClick={submit}>
-              <Ico name="check" size={13}/>{isEditing ? "Save changes" : "Log entry"}
+              <Ico name="check" size={13}/>{isAutoMeeting ? "Save my notes" : isEditing ? "Save changes" : "Log entry"}
             </button>
           </div>
         </div>

@@ -438,6 +438,146 @@ window.DB = (function () {
     size_mb: (1 + (parseInt(d.deliverable_id.split("-")[1]) % 8) * 0.7).toFixed(1),
   }));
 
+  // ============================================
+  // MEETINGS / Minutes of Meeting
+  // When a meeting is created with tagged attendees, the daily log entries
+  // are auto-generated for those attendees (see dailyLogEntries below where
+  // meeting_id is set on certain entries). Engineers can then add personal
+  // notes on top of the auto-logged entry.
+  // ============================================
+  const meetings = [
+    {
+      meeting_id: "MTG-001",
+      project_id: "P-001",
+      title: "Weekly client steerco",
+      meeting_type: "Steerco",
+      scheduled_at: "2026-05-18T08:15:00Z",
+      duration_minutes: 90,
+      location: "QatarEnergy HQ — Boardroom 4 / Teams",
+      chair_employee_id: "EMP-001",
+      agenda: [
+        "Schedule status and recovery actions",
+        "CR-002 — H2 vendor change decision",
+        "Stress Rev B client comments",
+        "Resource mobilisation update",
+        "AOB",
+      ],
+      attendees: [
+        { employee_id: "EMP-001", attendance: "present", role: "Chair" },     // Lina (PM)
+        { employee_id: "EMP-014", attendance: "present", role: "Mech Lead" }, // Yusuf
+        { employee_id: "EMP-013", attendance: "present", role: "Instr Lead" },
+        { employee_id: "EMP-040", attendance: "present", role: "Struct Lead" },
+        { employee_id: "EMP-002", attendance: "apologies", role: "Process Lead" },
+      ],
+      notes: "Client confirmed CR-002 Option A — schedule impact minimal. Stress Rev B feedback to be closed by end of week. Mech mobilisation approved by HR.",
+      decisions: [
+        { id: 1, text: "CR-002 Option A approved — proceed with revised H2 vendor", owner: "EMP-001", due: "2026-05-20" },
+        { id: 2, text: "Stress Rev B comments to be closed and re-issued as Rev C", owner: "EMP-014", due: "2026-05-22" },
+      ],
+      actions: [
+        { id: 1, text: "Issue revised forecast incorporating CR-002 outcome", owner: "EMP-001", due: "2026-05-20", status: "Open" },
+        { id: 2, text: "Update schedule baseline with new mech FTE", owner: "EMP-001", due: "2026-05-21", status: "Open" },
+        { id: 3, text: "Close out client comments on Stress Rev B", owner: "EMP-014", due: "2026-05-22", status: "Open" },
+      ],
+      created_at: "2026-05-18T08:15:00Z",
+      created_by: "EMP-001",
+    },
+    {
+      meeting_id: "MTG-002",
+      project_id: "P-001",
+      title: "Internal team standup",
+      meeting_type: "Standup",
+      scheduled_at: "2026-05-19T08:00:00Z",
+      duration_minutes: 30,
+      location: "Office Block A — Meeting Room 2",
+      chair_employee_id: "EMP-001",
+      agenda: [
+        "What's been done since last standup",
+        "Today's priorities by discipline",
+        "Blockers and dependencies",
+      ],
+      attendees: [
+        { employee_id: "EMP-001", attendance: "present", role: "Chair" },
+        { employee_id: "EMP-014", attendance: "present", role: "Mech Lead" },
+        { employee_id: "EMP-013", attendance: "present", role: "Instr Lead" },
+        { employee_id: "EMP-040", attendance: "present", role: "Struct Lead" },
+        { employee_id: "EMP-010", attendance: "present", role: "Process" },
+        { employee_id: "EMP-050", attendance: "present", role: "HSE" },
+      ],
+      notes: "Team aligned on revised schedule. Mech & Civil to focus on next milestone. No new blockers raised.",
+      decisions: [],
+      actions: [
+        { id: 1, text: "Mech to finalise Stress Rev C draft by EOD Friday", owner: "EMP-014", due: "2026-05-22", status: "Open" },
+      ],
+      created_at: "2026-05-19T08:00:00Z",
+      created_by: "EMP-001",
+    },
+    {
+      meeting_id: "MTG-003",
+      project_id: "P-001",
+      title: "Risk review session",
+      meeting_type: "Risk Review",
+      scheduled_at: "2026-05-08T09:00:00Z",
+      duration_minutes: 90,
+      location: "Office Block A — Meeting Room 1",
+      chair_employee_id: "EMP-001",
+      agenda: [
+        "Review all open risks",
+        "Update probability and impact ratings",
+        "Close mitigated risks",
+        "Identify new risks",
+      ],
+      attendees: [
+        { employee_id: "EMP-001", attendance: "present", role: "Chair" },
+        { employee_id: "EMP-014", attendance: "present", role: "Mech Lead" },
+        { employee_id: "EMP-013", attendance: "present", role: "Instr Lead" },
+        { employee_id: "EMP-050", attendance: "present", role: "HSE Lead" },
+        { employee_id: "EMP-091", attendance: "present", role: "QA Lead" },
+      ],
+      notes: "Closed R-005 (procurement contracts) — vendor framework now in place. Two new risks raised on hydrogen package vendor quality and skilled engineer availability.",
+      decisions: [
+        { id: 1, text: "R-005 closed", owner: "EMP-001", due: null },
+        { id: 2, text: "R-006 promoted Med → High based on resource forecast", owner: "EMP-001", due: null },
+      ],
+      actions: [
+        { id: 1, text: "Update risk register with new ratings", owner: "EMP-001", due: "2026-05-09", status: "Done" },
+        { id: 2, text: "Mech to assess vendor quality on hydrogen package", owner: "EMP-014", due: "2026-05-15", status: "Done" },
+      ],
+      created_at: "2026-05-08T09:00:00Z",
+      created_by: "EMP-001",
+    },
+    {
+      meeting_id: "MTG-004",
+      project_id: "P-002",
+      title: "EXP-204 milestone planning",
+      meeting_type: "Planning",
+      scheduled_at: "2026-05-11T14:00:00Z",
+      duration_minutes: 120,
+      location: "Teams",
+      chair_employee_id: "EMP-002",
+      agenda: [
+        "Review current baseline against actuals",
+        "Re-baseline milestones",
+        "Resource impact discussion",
+      ],
+      attendees: [
+        { employee_id: "EMP-002", attendance: "present", role: "Chair" },
+        { employee_id: "EMP-001", attendance: "present", role: "Cross-project PM" },
+        { employee_id: "EMP-010", attendance: "present", role: "Process Lead" },
+        { employee_id: "EMP-014", attendance: "present", role: "Mech Lead" },
+      ],
+      notes: "New baseline approved internally. Submitting to client for review next week.",
+      decisions: [
+        { id: 1, text: "Milestone 3 baseline shifted +2 weeks", owner: "EMP-002", due: "2026-05-18" },
+      ],
+      actions: [
+        { id: 1, text: "Issue revised schedule to client", owner: "EMP-002", due: "2026-05-18", status: "Open" },
+      ],
+      created_at: "2026-05-11T14:00:00Z",
+      created_by: "EMP-002",
+    },
+  ];
+
   const notifications = [
     { id: "N-01", user_id: "U-001", type: "approval",    title: "Approval requested",         message: "P&ID — Hydrogen production package (Rev B) needs your sign-off.",       link: "#/approvals/APR-008", read: false, created_at: "2026-05-19T09:14:00Z", priority: "high"   },
     { id: "N-02", user_id: "U-001", type: "deliverable", title: "Deliverable delayed",        message: "Piping stress analysis — Hydrogen unit is 4 days overdue.",            link: "#/deliverables/DEL-0006", read: false, created_at: "2026-05-19T08:42:00Z", priority: "high"   },
@@ -475,7 +615,12 @@ window.DB = (function () {
     // Generate deterministic entries for the demo user (EMP-001 / Lina Holm) +
     // a few other engineers, covering the past ~3 weeks so the weekly report
     // and project-grouping views have meaningful data.
-    function add(date, time, emp, proj, del, type, title, body, hours, links, tags) {
+    //
+    // Entries with a non-null meeting_id represent meetings where the user
+    // has already added personal notes on top of the auto-generated stub.
+    // Meeting-type entries without a meeting_id are ad-hoc meetings the
+    // user logged manually (not tied to a formal MoM).
+    function add(date, time, emp, proj, del, type, title, body, hours, links, tags, meetingId) {
       out.push({
         entry_id: id(),
         employee_id: emp,
@@ -488,6 +633,7 @@ window.DB = (function () {
         links: links || [],
         tags: tags || [],
         created_at: date + "T" + time + ":00Z",
+        meeting_id: meetingId || null,
       });
     }
 
@@ -516,12 +662,12 @@ window.DB = (function () {
     add("2026-05-06", "13:00", "EMP-001", "P-001", null,         "meeting",  "Internal cost review", "Met with commercial team. Approved CR-002 cost impact. Flagged CR-005 needs more detail.", 1.5, [], ["cost","change"]);
     add("2026-05-07", "10:00", "EMP-001", "P-001", null,         "blocker",  "Client decision overdue — vendor change", "Client has not decided on H2 vendor change (CR-002). 5 days past due. Escalating to PD.", null, [{kind:"email", label:"H2 vendor decision", value:"mailto:client@qegc.qa?subject=H2+vendor+decision+overdue"}], ["client","blocker","escalation"]);
     add("2026-05-07", "15:30", "EMP-001", "P-001", "DEL-0006",  "work",     "Updated stress analysis briefing", "Briefed Yusuf on vendor data + 2 missing supports. Stress rev B issue planned for next Mon.", 1.5, [], ["mechanical","brief"]);
-    add("2026-05-08", "09:00", "EMP-001", "P-001", null,         "meeting",  "Risk review session", "Reviewed all open risks with team. Closed R-005 (procurement contracts). Two new risks logged.", 1.5, [], ["risk","review"]);
+    add("2026-05-08", "09:00", "EMP-001", "P-001", null,         "meeting",  "Risk review session", "Reviewed all open risks with team. Closed R-005 (procurement contracts). Two new risks logged.", 1.5, [], ["risk","review"], "MTG-003");
 
     // Week 20 (May 11 - May 17) — current/recent week
     add("2026-05-11", "08:00", "EMP-001", "P-001", null,         "meeting",  "Weekly client steerco", "Client decision on CR-002 still pending. Senior client lead committed to decision by Wed.", 1.5, [], ["client","steerco"]);
     add("2026-05-11", "11:00", "EMP-001", "P-001", "DEL-0006",  "work",     "Stress analysis Rev B issued", "Yusuf issued Rev B with all comments closed. Sent for client review.", 0.5, [], ["mechanical","issue"]);
-    add("2026-05-11", "14:00", "EMP-001", "P-002", null,         "work",     "EXP-204 milestone planning", "Worked with planner on EXP-204 milestone re-baseline. New baseline ready for client review.", 2.5, [], ["planning","milestone"]);
+    add("2026-05-11", "14:00", "EMP-001", "P-002", null,         "work",     "EXP-204 milestone planning", "Worked with planner on EXP-204 milestone re-baseline. New baseline ready for client review.", 2.5, [], ["planning","milestone"], "MTG-004");
     add("2026-05-12", "09:30", "EMP-001", "P-001", null,         "comm",     "Email follow-up — CR-002", "Sent reminder to client on CR-002 vendor change decision.", 0.25, [{kind:"email", label:"CR-002 reminder", value:"mailto:client@qegc.qa"}], ["client","email"]);
     add("2026-05-12", "11:00", "EMP-001", "P-001", null,         "work",     "Updated WBS for recovery plan", "Updated WBS to reflect Option B recovery. New tasks created and assigned.", 2.0, [], ["wbs","planning"]);
     add("2026-05-12", "16:00", "EMP-001", "P-001", null,         "note",     "Reminder — call Felipe re: instrumentation", "Need to coordinate instrumentation interfaces with Felipe by Thu.", null, [], ["followup","instrumentation"]);
@@ -532,9 +678,9 @@ window.DB = (function () {
     add("2026-05-14", "15:00", "EMP-001", "P-001", null,         "work",     "Drafted PD escalation", "Drafted escalation to Project Director re: client decision delay. Will send Mon morning.", 1.5, [], ["escalation","admin"]);
     add("2026-05-15", "09:00", "EMP-001", "P-001", null,         "work",     "Weekly progress report", "Compiled Wk20 progress report. Used auto-summary from log.", 1.0, [], ["report","admin"]);
     add("2026-05-15", "13:00", "EMP-001", "P-002", null,         "comm",     "EXP-204 cost review with commercial", "Walked through latest forecast. All within tolerance. No actions.", 1.0, [], ["cost","review"]);
-    add("2026-05-18", "08:15", "EMP-001", "P-001", null,         "meeting",  "Client steerco", "CR-002 decision received Mon morning — approved Option A. Schedule impact minimal.", 1.5, [], ["client","steerco"]);
+    add("2026-05-18", "08:15", "EMP-001", "P-001", null,         "meeting",  "Weekly client steerco", "CR-002 decision received Mon morning — approved Option A. Schedule impact minimal.", 1.5, [], ["client","steerco"], "MTG-001");
     add("2026-05-18", "11:00", "EMP-001", "P-001", null,         "work",     "Updated forecast with CR-002 outcome", "Updated forecast and schedule with approved CR-002 outcome. Forecast now back to amber.", 2.0, [], ["forecast","change"]);
-    add("2026-05-19", "08:00", "EMP-001", "P-001", null,         "meeting",  "Internal team standup", "Team aligned on revised schedule. Mech & Civil to focus on next milestone.", 0.5, [], ["standup","team"]);
+    add("2026-05-19", "08:00", "EMP-001", "P-001", null,         "meeting",  "Internal team standup", "Team aligned on revised schedule. Mech & Civil to focus on next milestone.", 0.5, [], ["standup","team"], "MTG-002");
     add("2026-05-19", "10:30", "EMP-001", "P-001", "DEL-0006",  "work",     "Stress Rev B client review feedback", "Client returned 4 minor comments on Stress Rev B. Tracked to Yusuf for resolution.", 1.0, [], ["mechanical","feedback"]);
 
     // ——— EMP-014 (Yusuf, Mech Lead on GFB-101) — sample week ———
@@ -545,7 +691,6 @@ window.DB = (function () {
     add("2026-05-14", "08:30", "EMP-014", "P-001", null,      "blocker","Need decision on header thickness", "Process group has 2 options for header thickness. Need PM to escalate to client for decision.", null, [], ["process","blocker"]);
     add("2026-05-15", "11:00", "EMP-014", "P-002", null,      "work",   "Started EXP-204 review", "Reviewed mech inputs for EXP-204 baseline.", 2.0, [], ["exp-204"]);
     add("2026-05-18", "09:00", "EMP-014", "P-001", "DEL-0006","work",   "Client comments on Stress Rev B", "Reviewing 4 client comments. 2 minor, 2 require process input.", 2.5, [], ["mechanical","comments"]);
-    add("2026-05-19", "08:30", "EMP-014", "P-001", null,      "meeting","Standup", "Team standup, reviewed open actions.", 0.5, [], ["standup"]);
 
     return out;
   })();
@@ -563,16 +708,94 @@ window.DB = (function () {
   function changeById(id) { return changes.find(c => c.change_id === id); }
   function approvalById(id) { return approvals.find(a => a.approval_id === id); }
   function costByProject(pid) { return costs.find(c => c.project_id === pid); }
-  function dailyLogEntryById(id) { return dailyLogEntries.find(e => e.entry_id === id); }
+  function dailyLogEntryById(id) {
+    // Try manual entries first
+    const manual = dailyLogEntries.find(e => e.entry_id === id);
+    if (manual) return manual;
+    // Otherwise check auto-generated meeting entries (synthesised IDs start with "DLOG-MTG-")
+    if (id && id.startsWith("DLOG-MTG-")) {
+      const parts = id.replace("DLOG-MTG-", "").split("--");
+      const meetingId = parts[0];
+      const empId = parts[1];
+      const m = meetingById(meetingId);
+      if (m) return buildMeetingEntry(m, empId);
+    }
+    return null;
+  }
+
+  // ============================================
+  // MEETING HELPERS
+  // ============================================
+  function meetingById(id) { return meetings.find(m => m.meeting_id === id); }
+
+  function meetingsByProject(projectId) {
+    return meetings.filter(m => m.project_id === projectId)
+      .sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
+  }
+
+  function meetingsByAttendee(empId) {
+    return meetings.filter(m => m.attendees.some(a => a.employee_id === empId))
+      .sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
+  }
+
+  function attendanceFor(meeting, empId) {
+    return meeting.attendees.find(a => a.employee_id === empId);
+  }
+
+  // Build a synthetic log entry for a meeting attendee. This is the
+  // "auto-generated" entry that appears in the employee's daily log
+  // until they edit it to add their personal notes (at which point a
+  // real entry with this meeting_id replaces it).
+  function buildMeetingEntry(meeting, empId) {
+    const attendance = attendanceFor(meeting, empId);
+    if (!attendance || attendance.attendance === "absent") return null;
+    return {
+      entry_id: "DLOG-MTG-" + meeting.meeting_id + "--" + empId,
+      employee_id: empId,
+      project_id: meeting.project_id,
+      deliverable_id: null,
+      entry_type: "meeting",
+      title: meeting.title,
+      body: "Auto-logged from minutes — add your personal notes/follow-ups.",
+      hours: attendance.attendance === "present" ? (meeting.duration_minutes / 60) : null,
+      links: [],
+      tags: [meeting.meeting_type.toLowerCase().replace(/\s+/g, "-"), "auto"],
+      created_at: meeting.scheduled_at,
+      meeting_id: meeting.meeting_id,
+      auto_generated: true,         // distinguishes the synthetic stub
+      attendance: attendance.attendance,
+      role_in_meeting: attendance.role,
+    };
+  }
+
+  // For an employee, return synthetic meeting entries for every meeting
+  // they attended that they HAVEN'T already added personal notes to.
+  // A manual entry with meeting_id === meeting.meeting_id means
+  // "personal notes added" — the auto stub is suppressed.
+  function autoMeetingEntriesFor(empId) {
+    const manualMeetingIds = new Set(
+      dailyLogEntries
+        .filter(e => e.employee_id === empId && e.meeting_id)
+        .map(e => e.meeting_id)
+    );
+    return meetingsByAttendee(empId)
+      .filter(m => !manualMeetingIds.has(m.meeting_id))
+      .map(m => buildMeetingEntry(m, empId))
+      .filter(Boolean);
+  }
 
   // ============================================
   // DAILY LOG HELPERS
   // ============================================
 
   // Return all entries for an employee, optionally filtered.
+  // Merges manual entries + auto-generated meeting entries.
   function dailyLogByEmployee(empId, opts) {
     opts = opts || {};
-    let list = dailyLogEntries.filter(e => e.employee_id === empId);
+    let manual = dailyLogEntries.filter(e => e.employee_id === empId);
+    const auto = autoMeetingEntriesFor(empId);
+    let list = manual.concat(auto);
+
     if (opts.project_id)    list = list.filter(e => e.project_id === opts.project_id);
     if (opts.from)          list = list.filter(e => e.created_at >= opts.from);
     if (opts.to)            list = list.filter(e => e.created_at <= opts.to);
@@ -608,6 +831,20 @@ window.DB = (function () {
   function dailyLogByProject(projectId, opts) {
     opts = opts || {};
     let list = dailyLogEntries.filter(e => e.project_id === projectId);
+    // Add auto-generated meeting entries for all attendees on meetings in this project
+    const projectMeetings = meetings.filter(m => m.project_id === projectId);
+    const manualMeetingPairs = new Set(
+      list.filter(e => e.meeting_id).map(e => e.meeting_id + "|" + e.employee_id)
+    );
+    for (const m of projectMeetings) {
+      for (const a of m.attendees) {
+        if (a.attendance === "absent") continue;
+        // Skip if attendee already has a manual entry for this meeting
+        if (manualMeetingPairs.has(m.meeting_id + "|" + a.employee_id)) continue;
+        const stub = buildMeetingEntry(m, a.employee_id);
+        if (stub) list.push(stub);
+      }
+    }
     if (opts.employee_id)   list = list.filter(e => e.employee_id === opts.employee_id);
     if (opts.from)          list = list.filter(e => e.created_at >= opts.from);
     if (opts.to)            list = list.filter(e => e.created_at <= opts.to);
@@ -1038,18 +1275,19 @@ window.DB = (function () {
     // Source data
     roles, disciplineNames, employees, users, projects, activeProject, disciplines, assignments,
     planningWeeks, allocations, deliverables, costs, risks, approvals, changes, milestones,
-    documents, notifications, dailyLogEntries,
+    documents, notifications, dailyLogEntries, meetings,
     // Lookup helpers
     employeeById, projectById, projectByCode, deliverableById, changeById, approvalById,
-    costByProject, dailyLogEntryById,
+    costByProject, dailyLogEntryById, meetingById,
     // Derived metrics
     portfolioKPIs, disciplineUtilization, projectMetrics,
     riskSummary, changeImpact, approvalSummary, deliverableSummary,
     weeklyBurn, monthlyBurn, projectSCurve,
     employeeAllocation, employeeWeekHours,
     analyticsKPIs, clientConcentration, projectTypeMix,
-    // Daily log
+    // Daily log + meetings
     dailyLogByEmployee, dailyLogByDay, dailyLogByProject, weeklyReport,
+    meetingsByProject, meetingsByAttendee, attendanceFor, autoMeetingEntriesFor, buildMeetingEntry,
     TODAY,
   };
 })();

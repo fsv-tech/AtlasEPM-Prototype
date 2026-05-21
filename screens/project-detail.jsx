@@ -31,11 +31,16 @@ function ScreenProjectDetail({ projectId, tab }) {
     { value: "risks",        label: "Risks",        icon: "shield",  count: risksList.length },
     { value: "changes",      label: "Changes",      icon: "git",     count: changeList.length },
     { value: "approvals",    label: "Approvals",    icon: "checkSquare", count: approvals.length },
+    { value: "minutes",      label: "Minutes",      icon: "users",   count: DB.meetingsByProject(p.project_id).length },
     { value: "documents",    label: "Documents",    icon: "folder",  count: DB.documents.filter(d => d.project_id === p.project_id).length },
     { value: "gantt",        label: "Schedule",     icon: "gantt" },
     { value: "log",          label: "Activity log", icon: "book",    count: DB.dailyLogEntries.filter(e => e.project_id === p.project_id).length },
   ];
-  const activeTab = tabs.find(t => t.value === tab) ? tab : "overview";
+  // Support a sub-route for individual meeting: tab can be "minutes/MTG-001"
+  const tabParts = (tab || "").split("/");
+  const tabRoot = tabParts[0];
+  const tabArg = tabParts[1];
+  const activeTab = tabs.find(t => t.value === tabRoot) ? tabRoot : "overview";
 
   return (
     <div className="content" data-tour-id="page">
@@ -108,6 +113,7 @@ function ScreenProjectDetail({ projectId, tab }) {
       {activeTab === "changes"      && <ProjectChanges p={p} changes={changeList}/>}
       {activeTab === "approvals"    && <ProjectApprovals p={p} approvals={approvals}/>}
       {activeTab === "documents"    && <ProjectDocuments p={p}/>}
+      {activeTab === "minutes"      && (tabArg ? <ProjectMeetingDetail p={p} meetingId={tabArg}/> : <ProjectMinutes p={p}/>)}
       {activeTab === "gantt"        && <ProjectGantt p={p} disc={disc} milestones={milestones}/>}
       {activeTab === "log"          && <ProjectActivityLog p={p}/>}
     </div>
@@ -1229,6 +1235,267 @@ function ProjectActivityLog({ p }) {
           );
         })
       )}
+    </div>
+  );
+}
+
+// =========================================================
+// Minutes of Meeting — list view
+// Each meeting auto-creates log entries for attendees marked as present.
+// =========================================================
+function ProjectMinutes({ p }) {
+  const meetings = DB.meetingsByProject(p.project_id);
+  return (
+    <div className="col" style={{ gap: 16 }}>
+      <div className="kpi-grid">
+        <KPI featured label="Meetings logged" icon="users" value={meetings.length} foot="across this project" helpKey="daily-log"/>
+        <KPI label="Total hours" icon="clock" value={meetings.reduce((s, m) => s + m.duration_minutes/60, 0).toFixed(1)} unit="h"/>
+        <KPI label="Attendee entries" icon="zap" value={meetings.reduce((s, m) => s + m.attendees.filter(a => a.attendance !== "absent").length, 0)} foot="auto-logged to My Day"/>
+        <KPI label="Open actions" icon="checkSquare" value={meetings.reduce((s, m) => s + m.actions.filter(a => a.status === "Open").length, 0)}/>
+        <KPI label="Decisions" icon="check" value={meetings.reduce((s, m) => s + m.decisions.length, 0)}/>
+      </div>
+
+      <div className="card flush">
+        <div className="table-head">
+          <div className="table-head-l">
+            <h3 className="card-title">Minutes of Meeting</h3>
+            <div className="muted tiny">Attendees get an auto-logged entry in their My Day where they can add personal notes</div>
+          </div>
+          <button className="btn primary"><Ico name="plus" size={13}/>New meeting</button>
+        </div>
+        {meetings.length === 0 ? (
+          <Empty title="No meetings yet" subtitle="Create the first meeting — attendees will see it auto-logged in their daily log." icon="users"/>
+        ) : (
+          <table className="data">
+            <thead><tr>
+              <th>Meeting</th>
+              <th>Type</th>
+              <th>Date / time</th>
+              <th>Chair</th>
+              <th>Attendance</th>
+              <th className="num">Actions</th>
+            </tr></thead>
+            <tbody>
+              {meetings.map(m => {
+                const chair = DB.employeeById(m.chair_employee_id);
+                const present = m.attendees.filter(a => a.attendance === "present").length;
+                const total = m.attendees.length;
+                const openActions = m.actions.filter(a => a.status === "Open").length;
+                return (
+                  <tr key={m.meeting_id} onClick={() => location.hash = `#/projects/${p.project_id}/minutes/${m.meeting_id}`}>
+                    <td>
+                      <div className="cell-strong">{m.title}</div>
+                      <div className="cell-sub mono">{m.meeting_id}</div>
+                    </td>
+                    <td><span className="badge" style={{ background: "var(--violet-soft)", color: "var(--violet)", fontSize: 11 }}>{m.meeting_type}</span></td>
+                    <td>
+                      <div style={{ fontSize: 12.5 }}>{U.fmtDate(m.scheduled_at)}</div>
+                      <div className="cell-sub mono">{m.scheduled_at.slice(11, 16)} · {m.duration_minutes}min</div>
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 6 }}>
+                        <Avatar employee={chair} size="sm"/>
+                        <span style={{ fontSize: 12.5 }}>{chair?.full_name}</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 8 }}>
+                        <AvatarStack employees={m.attendees.filter(a => a.attendance === "present").map(a => DB.employeeById(a.employee_id))} size="sm" max={4}/>
+                        <span className="mono tiny" style={{ color: "var(--ink-4)" }}>{present}/{total}</span>
+                      </div>
+                    </td>
+                    <td className="num cell-num">
+                      {openActions > 0
+                        ? <span style={{ color: "var(--amber)" }}>{openActions} open</span>
+                        : <span style={{ color: "var(--green)" }}>—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// =========================================================
+// Single Meeting / MoM detail view
+// Shows everything about a single meeting — agenda, attendees, notes,
+// decisions, actions — plus the personal-notes preview from each attendee
+// who has filled them in via their daily log.
+// =========================================================
+function ProjectMeetingDetail({ p, meetingId }) {
+  const m = DB.meetingById(meetingId);
+  if (!m) {
+    return (
+      <Empty title="Meeting not found" subtitle="This MoM may have been deleted." icon="users" action={
+        <a className="btn" href={`#/projects/${p.project_id}/minutes`}><Ico name="arrLeft" size={13}/>Back to minutes</a>
+      }/>
+    );
+  }
+  const chair = DB.employeeById(m.chair_employee_id);
+
+  // Personal notes from attendees who've added their own log entries
+  const attendeeNotes = DB.dailyLogEntries.filter(e => e.meeting_id === meetingId);
+
+  return (
+    <div className="col" style={{ gap: 16 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <a className="btn sm" href={`#/projects/${p.project_id}/minutes`}><Ico name="arrLeft" size={11}/>All minutes</a>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn sm"><Ico name="download" size={12}/>Export PDF</button>
+          <button className="btn sm"><Ico name="send" size={12}/>Send to attendees</button>
+          <button className="btn sm"><Ico name="edit" size={12}/>Edit</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ borderLeft: "3px solid var(--violet)" }}>
+        <div className="row" style={{ gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 9, background: "var(--violet)", color: "#fff", display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <Ico name="users" size={18}/>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 500 }}>{m.meeting_type} · {m.meeting_id}</div>
+            <h2 style={{ margin: "2px 0 6px", fontSize: 20, fontWeight: 500, letterSpacing: "-0.025em" }}>{m.title}</h2>
+            <div className="muted" style={{ fontSize: 12.5 }}>
+              {U.fmtDate(m.scheduled_at)} · {m.scheduled_at.slice(11, 16)} · {m.duration_minutes}min · {m.location}
+            </div>
+            <div className="row" style={{ gap: 6, marginTop: 8 }}>
+              <span className="muted tiny">Chaired by</span>
+              <Avatar employee={chair} size="sm"/>
+              <span style={{ fontSize: 12.5 }}>{chair?.full_name}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid" style={{ gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+        {/* LEFT: agenda, notes, decisions, actions */}
+        <div className="col" style={{ gap: 16 }}>
+          {m.agenda.length > 0 && (
+            <div className="card">
+              <CardH title="Agenda"/>
+              <ol style={{ margin: 0, padding: "0 0 0 20px", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.7 }}>
+                {m.agenda.map((item, i) => <li key={i}>{item}</li>)}
+              </ol>
+            </div>
+          )}
+
+          {m.notes && (
+            <div className="card">
+              <CardH title="Notes / discussion summary"/>
+              <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{m.notes}</div>
+            </div>
+          )}
+
+          {m.decisions.length > 0 && (
+            <div className="card">
+              <CardH title={`Decisions (${m.decisions.length})`}/>
+              <div className="col" style={{ gap: 8 }}>
+                {m.decisions.map(d => {
+                  const owner = DB.employeeById(d.owner);
+                  return (
+                    <div key={d.id} className="row" style={{ gap: 10, padding: 10, background: "var(--green-soft)", borderRadius: 6, borderLeft: "3px solid var(--green)" }}>
+                      <Ico name="check" size={13} color="var(--green)" style={{ marginTop: 2, flexShrink: 0 }}/>
+                      <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5 }}>
+                        <div style={{ color: "var(--ink-2)" }}>{d.text}</div>
+                        {owner && <div className="muted tiny" style={{ marginTop: 3 }}>Owner: {owner.full_name}{d.due ? ` · due ${U.fmtDate(d.due)}` : ""}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {m.actions.length > 0 && (
+            <div className="card">
+              <CardH title={`Action items (${m.actions.length})`}/>
+              <div className="col" style={{ gap: 8 }}>
+                {m.actions.map(a => {
+                  const owner = DB.employeeById(a.owner);
+                  const overdue = a.due && a.status === "Open" && a.due < DB.TODAY.toISOString().slice(0,10);
+                  return (
+                    <div key={a.id} className="row" style={{ gap: 10, padding: 10, background: a.status === "Done" ? "var(--surface-2)" : (overdue ? "var(--red-soft)" : "var(--amber-soft)"), borderRadius: 6, borderLeft: "3px solid " + (a.status === "Done" ? "var(--green)" : overdue ? "var(--red)" : "var(--amber)") }}>
+                      <Ico name={a.status === "Done" ? "checkCircle" : "circle"} size={13} color={a.status === "Done" ? "var(--green)" : overdue ? "var(--red)" : "var(--amber)"} style={{ marginTop: 2, flexShrink: 0 }}/>
+                      <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5 }}>
+                        <div style={{ color: "var(--ink-2)", textDecoration: a.status === "Done" ? "line-through" : "none", opacity: a.status === "Done" ? 0.7 : 1 }}>{a.text}</div>
+                        {owner && <div className="muted tiny" style={{ marginTop: 3 }}>Owner: {owner.full_name}{a.due ? ` · due ${U.fmtDate(a.due)}` : ""}</div>}
+                      </div>
+                      <span className="badge" style={{ fontSize: 10, background: a.status === "Done" ? "var(--green)" : overdue ? "var(--red)" : "var(--amber)", color: "#fff" }}>{a.status === "Done" ? "Done" : overdue ? "Overdue" : "Open"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: attendees + their personal notes */}
+        <div className="col" style={{ gap: 16 }}>
+          <div className="card">
+            <CardH title={`Attendees (${m.attendees.length})`} subtitle="Auto-logs to each present attendee's My Day"/>
+            <div className="col" style={{ gap: 8 }}>
+              {m.attendees.map(a => {
+                const emp = DB.employeeById(a.employee_id);
+                if (!emp) return null;
+                const hasNotes = attendeeNotes.find(n => n.employee_id === a.employee_id);
+                const status = a.attendance;
+                return (
+                  <div key={a.employee_id} className="row" style={{ gap: 10, padding: 8, background: "var(--surface-2)", borderRadius: 6 }}>
+                    <Avatar employee={emp} size="md"/>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="row" style={{ gap: 6 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 500 }}>{emp.full_name}</span>
+                        {a.role && <span className="muted tiny">· {a.role}</span>}
+                      </div>
+                      <div className="row" style={{ gap: 6, marginTop: 3 }}>
+                        <span className="badge" style={{ fontSize: 9.5, background: status === "present" ? "var(--green)" : status === "apologies" ? "var(--amber)" : "var(--ink-5)", color: "#fff" }}>
+                          {status === "present" ? "Present" : status === "apologies" ? "Apologies" : "Absent"}
+                        </span>
+                        {status === "present" && (
+                          hasNotes ? (
+                            <span className="badge" style={{ fontSize: 9.5, background: "var(--accent-soft)", color: "var(--accent)" }}>
+                              <Ico name="check" size={9}/>Notes added
+                            </span>
+                          ) : (
+                            <span className="muted tiny">Auto-logged · awaiting personal notes</span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {attendeeNotes.length > 0 && (
+            <div className="card">
+              <CardH title={`Attendee notes (${attendeeNotes.length})`} subtitle="Personal observations from attendees' daily logs"/>
+              <div className="col" style={{ gap: 10 }}>
+                {attendeeNotes.map(n => {
+                  const emp = DB.employeeById(n.employee_id);
+                  return (
+                    <div key={n.entry_id} className="row" style={{ gap: 10, padding: 8, background: "var(--surface-2)", borderRadius: 6, alignItems: "flex-start" }}>
+                      <Avatar employee={emp} size="sm"/>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="row" style={{ gap: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 500 }}>{emp?.full_name}</span>
+                          <span className="muted tiny mono">· {U.fmtDate(n.created_at)}</span>
+                        </div>
+                        {n.body && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.5 }}>{n.body}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

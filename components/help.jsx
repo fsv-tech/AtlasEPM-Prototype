@@ -31,7 +31,7 @@ const HELP_FEATURES = [
     key: "daily-log", nav: "daily-log", section: "Workspace",
     icon: "book", color: "var(--violet)",
     title: "My day · Daily log",
-    summary: "Your personal time-stamped log. Capture work, meetings, blockers, communications and notes — auto-rolls up into a weekly report.",
+    summary: "Your personal time-stamped log. Capture work, meetings, blockers, comms and notes — auto-rolls up into a weekly report.",
     capabilities: [
       "Log entries against any project + optional deliverable",
       "Five entry types: Work, Meeting, Comms, Note, Blocker",
@@ -39,8 +39,25 @@ const HELP_FEATURES = [
       "Filter by project, type, or text search",
       "Auto-generated weekly report — no manual report writing",
       "Project Activity Log tab shows all engineers' entries on a project",
+      "Meetings you attend auto-create log entries — just add your personal notes",
     ],
     try: { label: "Open my log", route: "daily-log" },
+  },
+  {
+    key: "minutes", nav: "projects", section: "Projects",
+    icon: "users", color: "var(--violet)",
+    title: "Minutes of Meeting (MoM)",
+    summary: "Project-level MoM with attendee tagging. Attendees automatically see the meeting in their My Day where they can add personal notes.",
+    capabilities: [
+      "Per-meeting agenda, notes, decisions and action items",
+      "Tag attendees with attendance: Present, Apologies, Absent",
+      "Each present attendee gets an auto-logged entry in their daily log",
+      "Attendees add personal notes on top of the official MoM",
+      "Personal notes feed into their weekly report automatically",
+      "PM/Chair can see who has added notes and who hasn't",
+      "Meeting duration auto-fills hours in attendee logs",
+    ],
+    try: { label: "View project minutes", route: "projects/P-001/minutes" },
   },
 
   // ——— Projects ———
@@ -416,6 +433,19 @@ const HELP_SHORTCUTS = [
 // only relevant updates per persona (null = everyone).
 // ============================================
 const HELP_CHANGELOG = [
+  {
+    date: "2026-05-21", version: "v0.4",
+    headline: "Minutes of Meeting → My Day auto-logging",
+    roles: ["Engineer","Discipline Lead","Project Manager","QA/QC"],
+    points: [
+      "New \"Minutes\" tab on every project — create MoMs with agenda, notes, decisions, actions",
+      "Tag attendees and mark attendance (Present / Apologies / Absent)",
+      "Each present attendee gets an auto-logged entry in their My Day with meeting duration as hours",
+      "Engineers add personal notes on top of the auto-stub — separate from the official MoM",
+      "Personal notes feed straight into the weekly report — no double entry",
+      "PM can see at-a-glance who has added notes and who hasn't",
+    ],
+  },
   {
     date: "2026-05-21", version: "v0.4",
     headline: "Daily log + auto-generated weekly report",

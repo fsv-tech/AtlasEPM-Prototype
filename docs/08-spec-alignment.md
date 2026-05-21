@@ -286,3 +286,39 @@ Implemented as a first-class feature.
 can't remember what they did on each by Friday. The log captures it as
 they go; the weekly report writes itself.
 
+---
+
+## ✅ Minutes of Meeting → Daily Log auto-linking
+
+Per Mike's follow-up: *"I'll wire up the MoM tab so if engineers are tagged
+in attendance it automatically logs it in their My Day where they can add
+their notes."*
+
+**Data model**:
+- `meetings` table tied to a project (title, type, scheduled_at, duration,
+  location, chair, agenda)
+- `meeting_attendees` M:N table with `attendance` enum (present / apologies / absent)
+- `meeting_decisions` + `meeting_actions` child tables
+- `daily_log_entries.meeting_id` foreign key with `UNIQUE (employee_id, meeting_id)`
+- `daily_log_entries.auto_generated` boolean flag
+
+**Behaviour**:
+1. PM creates a meeting with tagged attendees
+2. For each attendee marked `present`, a `daily_log_entries` row is auto-inserted with `auto_generated=true`, `entry_type='meeting'`, `hours = duration / 60`, and a placeholder body
+3. Attendee opens their My Day and sees the auto-logged entry with a violet "Auto from MoM" badge and a left-border accent
+4. Clicking it opens the composer with the MoM metadata as read-only context (title, type, time, location, official notes) and focus on a "Your personal notes & follow-ups" textarea
+5. On save, `auto_generated` flips to `false`, `body` is replaced with their notes, but `meeting_id` is preserved
+6. MoM detail view shows which attendees have added personal notes and which haven't, with a preview of each engineer's notes
+7. Personal notes flow into the engineer's weekly report under the project's "Meetings" bucket
+
+**UI surfaces**:
+- New "Minutes" tab on every project — list of MoMs with attendance count, action status
+- MoM detail view — agenda, notes, decisions, action items (with overdue tracking), attendees with attendance pills, attendee personal notes preview
+- Daily log entries render with violet accent + "Auto from MoM" badge when auto-generated
+- Composer auto-detects meeting link and switches to "Add your notes" mode, locking project/title/hours and focusing personal-notes textarea
+
+**Reconciliation**:
+- `dailyLogByEmployee` merges manual entries with auto-generated stubs from `autoMeetingEntriesFor` (suppressing stubs where a manual entry with that meeting_id exists)
+- `dailyLogByProject` same logic across all project attendees
+- `weeklyReport` picks up auto-stubs automatically — meetings count and hours include them
+
