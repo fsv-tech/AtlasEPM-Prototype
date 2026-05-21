@@ -328,6 +328,36 @@ CREATE TABLE audit_events (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX audit_entity_idx ON audit_events(entity_type, entity_id);
+
+-- ---------- Daily Log ----------
+-- Per-engineer time-stamped activity log. Each entry can tie to a project
+-- and optionally a specific deliverable. Drives the auto-generated weekly
+-- report so engineers don't write reports by hand. See requirement note in
+-- docs/04 — added per Mike Holloway's feedback.
+CREATE TYPE log_entry_type AS ENUM ('work', 'meeting', 'comm', 'note', 'blocker');
+
+CREATE TABLE daily_log_entries (
+  entry_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id     uuid NOT NULL REFERENCES employees(employee_id),
+  project_id      uuid REFERENCES projects(project_id),
+  deliverable_id  uuid REFERENCES deliverables(deliverable_id),
+  entry_type      log_entry_type NOT NULL,
+  title           text NOT NULL,
+  body            text,
+  hours           numeric(4,2),
+  tags            text[] DEFAULT '{}',
+  -- links/emails: array of { kind: 'url'|'email', label, value } as jsonb
+  links           jsonb DEFAULT '[]'::jsonb,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX daily_log_emp_date_idx ON daily_log_entries (employee_id, created_at DESC);
+CREATE INDEX daily_log_project_idx   ON daily_log_entries (project_id, created_at DESC);
+CREATE INDEX daily_log_deliverable_idx ON daily_log_entries (deliverable_id) WHERE deliverable_id IS NOT NULL;
+CREATE INDEX daily_log_type_idx      ON daily_log_entries (entry_type);
+
+-- RLS: an engineer can read/write their own entries; PM + Discipline Lead
+-- can read entries on projects they own. See RLS section below for example.
 ```
 
 ## Row-level security (RLS) example

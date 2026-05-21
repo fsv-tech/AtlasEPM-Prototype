@@ -33,6 +33,7 @@ function ScreenProjectDetail({ projectId, tab }) {
     { value: "approvals",    label: "Approvals",    icon: "checkSquare", count: approvals.length },
     { value: "documents",    label: "Documents",    icon: "folder",  count: DB.documents.filter(d => d.project_id === p.project_id).length },
     { value: "gantt",        label: "Schedule",     icon: "gantt" },
+    { value: "log",          label: "Activity log", icon: "book",    count: DB.dailyLogEntries.filter(e => e.project_id === p.project_id).length },
   ];
   const activeTab = tabs.find(t => t.value === tab) ? tab : "overview";
 
@@ -76,7 +77,7 @@ function ScreenProjectDetail({ projectId, tab }) {
           <div className="row" style={{ gap: 8 }}>
             <button className="icon-btn" title="Star"><Ico name="bookmark" size={16}/></button>
             <button className="btn"><Ico name="share" size={13}/>Share</button>
-            <button className="btn"><Ico name="more" size={14}/></button>
+            <button className="btn" data-no-toast onClick={() => location.hash = `#/daily-log?project=${p.project_id}`}><Ico name="book" size={13}/>Log entry</button>
             <button className="btn primary" data-no-toast onClick={() => location.hash = '#/deliverables'}><Ico name="plus" size={13}/>Add deliverable</button>
           </div>
         </div>
@@ -108,6 +109,7 @@ function ScreenProjectDetail({ projectId, tab }) {
       {activeTab === "approvals"    && <ProjectApprovals p={p} approvals={approvals}/>}
       {activeTab === "documents"    && <ProjectDocuments p={p}/>}
       {activeTab === "gantt"        && <ProjectGantt p={p} disc={disc} milestones={milestones}/>}
+      {activeTab === "log"          && <ProjectActivityLog p={p}/>}
     </div>
   );
 }
@@ -992,6 +994,241 @@ function ApprovalsView({ approvals }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// =========================================================
+// Project activity log — every engineer's log entries on this project
+// Mike's requirement: "reporting should be available for each project
+// separately." This view aggregates the daily log entries from all
+// engineers, with filtering by person, type, deliverable.
+// =========================================================
+function ProjectActivityLog({ p }) {
+  const [filterEmp, setFilterEmp]   = React.useState(null);
+  const [filterType, setFilterType] = React.useState(null);
+  const [filterDel, setFilterDel]   = React.useState(null);
+  const [search, setSearch]         = React.useState("");
+
+  const allEntries = DB.dailyLogByProject(p.project_id);
+
+  // Apply filters
+  let entries = allEntries;
+  if (filterEmp)  entries = entries.filter(e => e.employee_id === filterEmp);
+  if (filterType) entries = entries.filter(e => e.entry_type === filterType);
+  if (filterDel)  entries = entries.filter(e => e.deliverable_id === filterDel);
+  if (search) {
+    const q = search.toLowerCase();
+    entries = entries.filter(e =>
+      (e.title || "").toLowerCase().includes(q) ||
+      (e.body  || "").toLowerCase().includes(q) ||
+      (e.tags  || []).some(t => t.toLowerCase().includes(q))
+    );
+  }
+
+  // Group by day
+  const byDay = {};
+  for (const e of entries) {
+    const day = e.created_at.slice(0, 10);
+    if (!byDay[day]) byDay[day] = [];
+    byDay[day].push(e);
+  }
+  for (const d in byDay) byDay[d].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const days = Object.keys(byDay).sort().reverse().map(day => ({ day, entries: byDay[day] }));
+
+  // Stats
+  const totalHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+  const uniqueContributors = new Set(entries.map(e => e.employee_id));
+  const blockers = entries.filter(e => e.entry_type === "blocker");
+
+  // Contributor list (only those who have entries on this project)
+  const contributors = Array.from(new Set(allEntries.map(e => e.employee_id)))
+    .map(id => DB.employeeById(id))
+    .filter(Boolean);
+
+  const projectDeliverables = DB.deliverables
+    .filter(d => d.project_id === p.project_id && allEntries.some(e => e.deliverable_id === d.deliverable_id))
+    .sort((a, b) => a.deliverable_code.localeCompare(b.deliverable_code));
+
+  return (
+    <div className="col" style={{ gap: 16 }}>
+      <div className="kpi-grid">
+        <KPI featured label="Total entries" icon="book" value={allEntries.length} foot={uniqueContributors.size + " contributors"}/>
+        <KPI label="Hours logged" icon="clock" value={allEntries.reduce((s,e)=>s+(e.hours||0),0).toFixed(1)} unit="h"/>
+        <KPI label="Blockers raised" icon="alertTri" value={allEntries.filter(e=>e.entry_type==="blocker").length} foot={blockers.filter(e => e.created_at.slice(0,10) >= new Date(DB.TODAY.getTime() - 7*86400000).toISOString().slice(0,10)).length + " in last 7 days"} deltaDir={blockers.length > 0 ? "down" : "up"}/>
+        <KPI label="Meetings" icon="users" value={allEntries.filter(e=>e.entry_type==="meeting").length}/>
+        <KPI label="Communications" icon="send" value={allEntries.filter(e=>e.entry_type==="comm").length}/>
+      </div>
+
+      {/* Filters */}
+      <div className="card" style={{ padding: 12 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <span className="muted tiny" style={{ marginRight: 4 }}>WHO</span>
+          <button className={"chip" + (filterEmp === null ? " active" : "")} onClick={() => setFilterEmp(null)}>Everyone</button>
+          {contributors.map(emp => (
+            <button key={emp.employee_id} className={"chip" + (filterEmp === emp.employee_id ? " active" : "")} onClick={() => setFilterEmp(emp.employee_id)}>
+              <Avatar employee={emp} size="sm"/>
+              {emp.full_name.split(" ").slice(-1)[0]}
+            </button>
+          ))}
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <span className="muted tiny" style={{ marginRight: 4 }}>TYPE</span>
+          <button className={"chip" + (filterType === null ? " active" : "")} onClick={() => setFilterType(null)}>All types</button>
+          {[
+            { v: "work", l: "Work", c: "var(--accent)", i: "edit" },
+            { v: "meeting", l: "Meetings", c: "var(--violet)", i: "users" },
+            { v: "comm", l: "Comms", c: "var(--cyan)", i: "send" },
+            { v: "blocker", l: "Blockers", c: "var(--red)", i: "alertTri" },
+            { v: "note", l: "Notes", c: "var(--ink-3)", i: "fileText" },
+          ].map(t => (
+            <button key={t.v} className={"chip" + (filterType === t.v ? " active" : "")} onClick={() => setFilterType(t.v)}>
+              <Ico name={t.i} size={11} color={t.c}/>{t.l}
+            </button>
+          ))}
+        </div>
+        {projectDeliverables.length > 0 && (
+          <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <span className="muted tiny" style={{ marginRight: 4 }}>DELIVERABLE</span>
+            <button className={"chip" + (filterDel === null ? " active" : "")} onClick={() => setFilterDel(null)}>Any</button>
+            {projectDeliverables.map(d => (
+              <button key={d.deliverable_id} className={"chip" + (filterDel === d.deliverable_id ? " active" : "")} onClick={() => setFilterDel(d.deliverable_id)}>
+                <Ico name="fileText" size={11}/>{d.deliverable_code}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="row" style={{ marginTop: 10, gap: 8 }}>
+          <div className="row" style={{ gap: 8, flex: 1, padding: "7px 12px", background: "var(--surface-3)", borderRadius: 7 }}>
+            <Ico name="search" size={13} color="var(--ink-4)"/>
+            <input
+              type="text"
+              placeholder="Search entries…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ border: "none", background: "transparent", outline: "none", flex: 1, fontSize: 13 }}
+            />
+            {search && (
+              <button className="icon-btn" onClick={() => setSearch("")} style={{ width: 22, height: 22 }}>
+                <Ico name="x" size={12}/>
+              </button>
+            )}
+          </div>
+          <div className="muted tiny mono">
+            {entries.length} of {allEntries.length} · {totalHours.toFixed(1)}h
+          </div>
+        </div>
+      </div>
+
+      {days.length === 0 ? (
+        <Empty title="No log entries match" subtitle="Try clearing some filters above." icon="book"/>
+      ) : (
+        days.map(({ day, entries }) => {
+          const date = new Date(day + "T12:00:00Z");
+          const isToday = day === DB.TODAY.toISOString().slice(0, 10);
+          const yesterdayStr = new Date(DB.TODAY.getTime() - 86400000).toISOString().slice(0, 10);
+          const isYesterday = day === yesterdayStr;
+          const dayLabel = isToday ? "Today" : isYesterday ? "Yesterday" :
+            date.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
+          const dayHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+
+          return (
+            <div key={day} className="card flush">
+              <div style={{
+                padding: "10px 18px",
+                borderBottom: "1px solid var(--line)",
+                display: "flex", alignItems: "center", gap: 12,
+                background: isToday ? "var(--accent-soft-2)" : "var(--surface-2)",
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div className="row" style={{ gap: 10 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: "-0.015em", color: isToday ? "var(--accent)" : "var(--ink)" }}>{dayLabel}</span>
+                    <span className="muted tiny mono">{day}</span>
+                  </div>
+                </div>
+                <div className="muted tiny">
+                  <b className="mono" style={{ color: "var(--ink-2)" }}>{dayHours.toFixed(1)}h</b> · {entries.length} entr{entries.length === 1 ? "y" : "ies"}
+                </div>
+              </div>
+              <div style={{ padding: "4px 0" }}>
+                {entries.map(e => {
+                  const meta = {
+                    work:    { c: "var(--accent)", i: "edit" },
+                    meeting: { c: "var(--violet)", i: "users" },
+                    comm:    { c: "var(--cyan)",   i: "send" },
+                    note:    { c: "var(--ink-3)",  i: "fileText" },
+                    blocker: { c: "var(--red)",    i: "alertTri" },
+                  }[e.entry_type] || { c: "var(--ink-3)", i: "fileText" };
+                  const emp = DB.employeeById(e.employee_id);
+                  const del = e.deliverable_id ? DB.deliverableById(e.deliverable_id) : null;
+                  return (
+                    <div key={e.entry_id} style={{
+                      padding: "10px 18px",
+                      display: "grid",
+                      gridTemplateColumns: "60px 24px 130px 1fr",
+                      gap: 12,
+                      alignItems: "flex-start",
+                      borderBottom: "1px solid var(--line)",
+                    }}>
+                      <div className="mono" style={{ fontSize: 11, color: "var(--ink-4)", paddingTop: 3, textAlign: "right" }}>
+                        {e.created_at.slice(11, 16)}
+                      </div>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: 6,
+                        background: meta.c + "1A",
+                        color: meta.c,
+                        display: "grid", placeItems: "center",
+                        marginTop: 1,
+                      }}>
+                        <Ico name={meta.i} size={12}/>
+                      </div>
+                      <a href={`#/employees/${emp.employee_id}`}
+                         style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-2)", textDecoration: "none" }}>
+                        <Avatar employee={emp} size="sm"/>
+                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{emp.full_name.split(" ")[0]} {emp.full_name.split(" ").slice(-1)[0][0]}.</span>
+                      </a>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{e.title}</span>
+                          {e.hours != null && (
+                            <span className="badge" style={{ background: "var(--surface-3)", color: "var(--ink-2)", fontSize: 10.5 }}>
+                              <Ico name="clock" size={10}/>{e.hours}h
+                            </span>
+                          )}
+                          {del && (
+                            <a className="badge outline" href={`#/deliverables/${del.deliverable_id}`}
+                               style={{ fontSize: 10.5, textDecoration: "none" }}>
+                              <Ico name="fileText" size={10}/>{del.deliverable_code}
+                            </a>
+                          )}
+                        </div>
+                        {e.body && (
+                          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.5 }}>{e.body}</div>
+                        )}
+                        {(e.links?.length > 0 || e.tags?.length > 0) && (
+                          <div className="row" style={{ gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+                            {(e.links || []).map((l, i) => (
+                              <a key={i} href={l.value}
+                                 style={{ fontSize: 11, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none" }}>
+                                <Ico name={l.kind === "email" ? "mail" : "link"} size={11}/>{l.label}
+                              </a>
+                            ))}
+                            {(e.tags || []).map(t => (
+                              <span key={t} style={{ fontSize: 10.5, color: "var(--ink-4)", background: "var(--surface-3)", padding: "1px 6px", borderRadius: 4 }}>
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

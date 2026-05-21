@@ -5,6 +5,12 @@
 const NAV = [
   { section: "Workspace", items: [
     { id: "dashboard", label: "Dashboard", icon: "dashboard", route: "dashboard" },
+    { id: "daily-log", label: "My day", icon: "book", route: "daily-log",
+      badge: () => {
+        const today = DB.TODAY.toISOString().slice(0,10);
+        return DB.dailyLogEntries.filter(e => e.employee_id === "EMP-001" && e.created_at.slice(0,10) === today).length || null;
+      },
+      badgeKind: "accent" },
   ]},
   { section: "Projects", items: [
     { id: "projects",  label: "Projects",  icon: "folder", route: "projects",  badge: () => DB.projects.filter(p => p.status === "Active").length },
@@ -33,14 +39,14 @@ const NAV = [
 const ROLE_NAV = {
   "Admin":           null,
   "Executive":       ["dashboard","projects","cost","deliverables","approvals","risks","reports","analytics","notifications"],
-  "Project Manager": ["dashboard","projects","calendar","gantt","cost","deliverables","approvals","changes","risks","employees","reports","analytics","notifications"],
-  "Discipline Lead": ["dashboard","projects","calendar","deliverables","approvals","changes","risks","employees","reports","notifications"],
-  "Engineer":        ["dashboard","projects","deliverables","changes","risks","notifications"],
+  "Project Manager": ["dashboard","daily-log","projects","calendar","gantt","cost","deliverables","approvals","changes","risks","employees","reports","analytics","notifications"],
+  "Discipline Lead": ["dashboard","daily-log","projects","calendar","deliverables","approvals","changes","risks","employees","reports","notifications"],
+  "Engineer":        ["dashboard","daily-log","projects","deliverables","changes","risks","notifications"],
   "Planner":         ["dashboard","projects","calendar","gantt","employees","reports","analytics","notifications"],
   "Commercial":      ["dashboard","projects","cost","approvals","changes","reports","analytics","notifications"],
   "Client":          ["dashboard","projects","deliverables","reports","notifications"],
   "Doc Controller":  ["dashboard","projects","deliverables","notifications"],
-  "QA/QC":           ["dashboard","projects","deliverables","approvals","risks","reports","notifications"],
+  "QA/QC":           ["dashboard","daily-log","projects","deliverables","approvals","risks","reports","notifications"],
 };
 
 // ============================================
@@ -415,9 +421,16 @@ function UserPopover({ me, role, onClose, toast }) {
 // ============================================
 function parseHash(hash) {
   let h = hash.replace(/^#\/?/, "");
-  if (!h) return { route: "dashboard", parts: [] };
-  const parts = h.split("/");
-  return { route: parts[0], parts: parts.slice(1), raw: h };
+  if (!h) return { route: "dashboard", parts: [], query: {} };
+  // Separate path from query string (path?foo=bar)
+  const qIdx = h.indexOf("?");
+  const query = {};
+  if (qIdx >= 0) {
+    new URLSearchParams(h.slice(qIdx + 1)).forEach((v, k) => { query[k] = v; });
+    h = h.slice(0, qIdx);
+  }
+  const parts = h.split("/").filter(Boolean);
+  return { route: parts[0] || "dashboard", parts: parts.slice(1), raw: h, query };
 }
 function useRoute() {
   const [hash, setHash] = React.useState(() => location.hash);

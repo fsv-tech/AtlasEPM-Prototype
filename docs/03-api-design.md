@@ -108,6 +108,28 @@ GET    /approvals?status=Pending&approver=me  # queue for current user
 POST   /approvals/{id}/decision               # { decision: 'approve'|'reject', notes? }
 ```
 
+### Daily Log + Weekly Report
+Per-engineer time-stamped activity log. Drives the auto-generated weekly
+report so engineers don't have to write progress reports manually.
+
+```
+GET    /daily-log?employee_id=&project_id=&from=&to=&type=&q=    # list, filterable
+POST   /daily-log                                                # create entry (created_at = now())
+GET    /daily-log/{id}                                           # fetch single
+PATCH  /daily-log/{id}                                           # edit body/title/tags; created_at is immutable
+DELETE /daily-log/{id}                                           # soft-delete (audit-tracked)
+
+GET    /daily-log/weekly?employee_id=&week=YYYY-MM-DD            # auto-generated weekly report grouped by project
+GET    /projects/{id}/activity-log                               # all engineers' entries on a project (PM/Lead view)
+POST   /daily-log/weekly/email                                   # email a weekly report to PM/self
+```
+
+The `weekly` endpoint normalises the week start to Monday and returns a
+structured object: `{ employee, weekStart, weekEnd, isoWeek, projectGroups[],
+summary{ totalHours, totalEntries, totalBlockers, ... } }` where each project
+group contains separate buckets for `highlights` (work), `blockers`,
+`communications`, `meetings`, `notes`, plus touched deliverables.
+
 ### Reports & analytics
 
 ```

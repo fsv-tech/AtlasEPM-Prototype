@@ -251,3 +251,38 @@ source of truth is now:
 - Resource calendar "Engineers loaded" == distinct employees in `assignments`
 - All derived metrics react immediately when source rows change (no caching in
   the prototype; cache TTL ≤ 5 min specified in `docs/03-api-design.md` for prod)
+
+---
+
+## ✅ Daily Log + Weekly Report — added per Mike Holloway feedback
+
+Mike's feedback: *"Each person in the project should be able to open their own
+daily log… search projects, find the one they're working on… select the
+document and register the hours or make notes… and at the end of the week
+they get a weekly report. So the engineer saves time in report writing."*
+
+Implemented as a first-class feature.
+
+**Data model** (`data/index.js` → `daily_log_entries` table in DDL):
+- per-engineer time-stamped entries
+- entry types: `work`, `meeting`, `comm`, `note`, `blocker`
+- ties to a project (optional) and deliverable (optional)
+- supports `hours` (nullable), `tags[]`, and `links[]` (URL or `mailto:`)
+- immutable `created_at` timestamp (edits never change the time)
+
+**UI surfaces**:
+- `#/daily-log` — engineer's own timeline grouped by day, filterable by
+  project, entry type, and free-text search; entry composer modal with
+  project → deliverable cascading selector
+- `#/daily-log/weekly/:weekStart` — auto-generated weekly report grouped
+  by project, with separate Blockers / Work / Meetings / Comms / Notes
+  buckets and touched deliverables
+- Project detail → "Activity log" tab — every engineer's entries on a
+  project, filterable by person, type, and deliverable
+- Project detail header → "Log entry" button — deep-links into the
+  composer with the project pre-selected
+
+**Why this matters**: An engineer working 20–30 small projects in a day
+can't remember what they did on each by Friday. The log captures it as
+they go; the weekly report writes itself.
+

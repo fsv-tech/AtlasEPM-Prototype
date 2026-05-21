@@ -51,6 +51,8 @@ screens/
   control.jsx                   Approvals centre + Change requests + Risks
   insights.jsx                  Reports centre + Analytics + Notifications +
                                 Settings (4-screen file)
+  daily-log.jsx                 Per-engineer daily log + auto-generated
+                                weekly report (Mike Holloway feature request)
 ```
 
 ## Data integrity

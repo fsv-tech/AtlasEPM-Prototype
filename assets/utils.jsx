@@ -118,6 +118,14 @@ window.U = (function () {
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   }
 
+  // Project health → color
+  function healthColor(h) {
+    if (h === "green") return "var(--green)";
+    if (h === "amber") return "var(--amber)";
+    if (h === "red")   return "var(--red)";
+    return "var(--ink-5)";
+  }
+
   function deterministicRand(seed) {
     // Mulberry32
     return function () {
@@ -132,6 +140,6 @@ window.U = (function () {
     TODAY, fmtDate, daysFromToday, relTime, fmtMoney, fmtCurrency, fmtPct, fmtHours,
     statusClass, priorityClass, statusBadge, priorityBadge,
     initials, chartPalette, disciplineColors,
-    isoWeek, deterministicRand,
+    isoWeek, healthColor, deterministicRand,
   };
 })();

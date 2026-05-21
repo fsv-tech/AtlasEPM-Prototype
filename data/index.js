@@ -450,6 +450,107 @@ window.DB = (function () {
   ];
 
   // ============================================
+  // DAILY LOG ENTRIES
+  // Per-engineer time-stamped log; entries tag a project (optionally a
+  // specific deliverable) and an entry_type. Supports notes, hours,
+  // blockers, and attached links/emails. Drives the weekly report.
+  // ============================================
+  // Schema:
+  //   entry_id        — stable ID
+  //   employee_id     — owner of the entry
+  //   project_id      — optional, ties to a project
+  //   deliverable_id  — optional, ties to a specific deliverable
+  //   entry_type      — "work" | "note" | "blocker" | "comm" | "meeting"
+  //   title           — short headline
+  //   body            — free-form notes (markdown-ish)
+  //   hours           — hours logged against this entry (nullable for notes)
+  //   links           — array of { kind: "url"|"email", label, value }
+  //   tags            — string[]
+  //   created_at      — ISO timestamp (this is the canonical entry time)
+  const dailyLogEntries = (function buildDailyLog() {
+    const out = [];
+    let n = 1;
+    const id = () => "DLOG-" + String(n++).padStart(4, "0");
+
+    // Generate deterministic entries for the demo user (EMP-001 / Lina Holm) +
+    // a few other engineers, covering the past ~3 weeks so the weekly report
+    // and project-grouping views have meaningful data.
+    function add(date, time, emp, proj, del, type, title, body, hours, links, tags) {
+      out.push({
+        entry_id: id(),
+        employee_id: emp,
+        project_id: proj || null,
+        deliverable_id: del || null,
+        entry_type: type,
+        title,
+        body,
+        hours: hours || null,
+        links: links || [],
+        tags: tags || [],
+        created_at: date + "T" + time + ":00Z",
+      });
+    }
+
+    // ——— EMP-001 (Lina Holm, PM on GFB-101) — past 3 weeks ———
+    // Week 18 (Apr 27 - May 3)
+    add("2026-04-27", "08:15", "EMP-001", "P-001", null,         "meeting",  "Weekly client steerco", "Reviewed schedule slip on Hydrogen package. Client requested early P&ID rev B. Confirmed targets for May milestone.", 1.5, [], ["client","steerco"]);
+    add("2026-04-27", "10:30", "EMP-001", "P-001", "DEL-0006",  "work",     "Reviewed stress analysis draft", "Walked through stress isometrics for hydrogen header. Found two missing supports near vent stack — flagged to Yusuf.", 2.0, [], ["mechanical","review"]);
+    add("2026-04-27", "14:00", "EMP-001", "P-002", null,         "comm",     "Call with QatarEnergy commercial", "Confirmed scope on EXP-204 vendor data sheets. Asked for written confirmation by Wed.", 0.75, [{kind:"email", label:"Re: EXP-204 vendor data", value:"mailto:procurement@qatarenergy.qa?subject=EXP-204+vendor+data"}], ["client","email"]);
+    add("2026-04-28", "09:00", "EMP-001", "P-001", null,         "work",     "Schedule recovery options", "Drafted 3 schedule recovery scenarios. Reviewed with planner. Option B (parallel ITP) selected for client review.", 3.5, [], ["schedule","planning"]);
+    add("2026-04-28", "15:45", "EMP-001", "P-001", "DEL-0017",  "note",     "HAZOP closeout pending", "Lars to issue final HAZOP report by Friday. Need to chase before EOW.", null, [], ["hazop","followup"]);
+    add("2026-04-29", "08:30", "EMP-001", "P-001", null,         "meeting",  "Internal team standup", "Walked team through Hydrogen package status. Carlos confirmed civil drawings ready. Mech still 2d behind.", 0.5, [], ["standup","team"]);
+    add("2026-04-29", "11:00", "EMP-001", "P-001", "DEL-0006",  "blocker",  "Need vendor data — Hydrogen vent", "Vendor (Linde) has not returned data sheets for the vent silencer despite 2 follow-ups. Blocking stress completion.", null, [{kind:"email", label:"Linde — vent silencer", value:"mailto:projects.eu@linde.com"}], ["vendor","blocker"]);
+    add("2026-04-29", "16:20", "EMP-001", "P-001", null,         "work",     "Updated risk register", "Raised R-006 (skilled engineer availability) from Med → High based on Yusuf's load forecast.", 1.0, [], ["risk"]);
+    add("2026-04-30", "09:15", "EMP-001", "P-001", null,         "comm",     "Email to client — schedule update", "Sent revised schedule with recovery options. Asked for decision by next Tue steerco.", 0.5, [{kind:"email", label:"GFB-101 schedule rev C", value:"mailto:client@qegc.qa"}], ["client","email"]);
+    add("2026-04-30", "13:00", "EMP-001", "P-002", null,         "work",     "EXP-204 cost forecast review", "Walked through cost projections with commercial. Forecast variance now at 1.4%, within tolerance.", 2.0, [], ["cost","forecast"]);
+    add("2026-05-01", "10:00", "EMP-001", "P-001", "DEL-0017",  "work",     "Final HAZOP markups", "Reviewed Lars's final HAZOP report. Two minor markups returned. Ready for approval Monday.", 1.5, [], ["hazop","review"]);
+
+    // Week 19 (May 4 - May 10)
+    add("2026-05-04", "08:00", "EMP-001", "P-001", "DEL-0017",  "work",     "HAZOP approval workflow", "Approved HAZOP — Hydrogen package. Sent to commercial for final sign-off.", 0.5, [], ["hazop","approval"]);
+    add("2026-05-04", "09:30", "EMP-001", "P-001", null,         "meeting",  "Weekly client steerco", "Schedule recovery Option B approved by client. Need to mobilise additional mech engineer.", 1.5, [], ["client","steerco"]);
+    add("2026-05-04", "14:00", "EMP-001", "P-001", null,         "note",     "Need to discuss with HR", "Mobilising additional mech eng needs HR approval — 1 FTE for 6 weeks. Talk to Karina tomorrow.", null, [], ["hr","followup"]);
+    add("2026-05-05", "09:00", "EMP-001", "P-001", null,         "comm",     "Met with Karina (HR)", "Approved mob of 1 mech FTE for 6 wks. Started recruitment process — internal candidate identified.", 1.0, [], ["hr","resourcing"]);
+    add("2026-05-05", "11:30", "EMP-001", "P-001", "DEL-0006",  "work",     "Vendor data received from Linde", "Vent silencer data sheets arrived. Forwarded to Yusuf to incorporate into stress analysis.", 0.75, [], ["vendor","mechanical"]);
+    add("2026-05-05", "15:00", "EMP-001", "P-003", null,         "comm",     "PSR-309 quick check-in", "10-min call with Felipe to check status on PSR-309. All on track, no issues.", 0.25, [], ["psr-309","check-in"]);
+    add("2026-05-06", "08:30", "EMP-001", "P-001", null,         "work",     "Weekly progress report drafted", "Compiled Wk19 report from this log. Used the auto-generated summary as starting point.", 1.0, [], ["report","admin"]);
+    add("2026-05-06", "13:00", "EMP-001", "P-001", null,         "meeting",  "Internal cost review", "Met with commercial team. Approved CR-002 cost impact. Flagged CR-005 needs more detail.", 1.5, [], ["cost","change"]);
+    add("2026-05-07", "10:00", "EMP-001", "P-001", null,         "blocker",  "Client decision overdue — vendor change", "Client has not decided on H2 vendor change (CR-002). 5 days past due. Escalating to PD.", null, [{kind:"email", label:"H2 vendor decision", value:"mailto:client@qegc.qa?subject=H2+vendor+decision+overdue"}], ["client","blocker","escalation"]);
+    add("2026-05-07", "15:30", "EMP-001", "P-001", "DEL-0006",  "work",     "Updated stress analysis briefing", "Briefed Yusuf on vendor data + 2 missing supports. Stress rev B issue planned for next Mon.", 1.5, [], ["mechanical","brief"]);
+    add("2026-05-08", "09:00", "EMP-001", "P-001", null,         "meeting",  "Risk review session", "Reviewed all open risks with team. Closed R-005 (procurement contracts). Two new risks logged.", 1.5, [], ["risk","review"]);
+
+    // Week 20 (May 11 - May 17) — current/recent week
+    add("2026-05-11", "08:00", "EMP-001", "P-001", null,         "meeting",  "Weekly client steerco", "Client decision on CR-002 still pending. Senior client lead committed to decision by Wed.", 1.5, [], ["client","steerco"]);
+    add("2026-05-11", "11:00", "EMP-001", "P-001", "DEL-0006",  "work",     "Stress analysis Rev B issued", "Yusuf issued Rev B with all comments closed. Sent for client review.", 0.5, [], ["mechanical","issue"]);
+    add("2026-05-11", "14:00", "EMP-001", "P-002", null,         "work",     "EXP-204 milestone planning", "Worked with planner on EXP-204 milestone re-baseline. New baseline ready for client review.", 2.5, [], ["planning","milestone"]);
+    add("2026-05-12", "09:30", "EMP-001", "P-001", null,         "comm",     "Email follow-up — CR-002", "Sent reminder to client on CR-002 vendor change decision.", 0.25, [{kind:"email", label:"CR-002 reminder", value:"mailto:client@qegc.qa"}], ["client","email"]);
+    add("2026-05-12", "11:00", "EMP-001", "P-001", null,         "work",     "Updated WBS for recovery plan", "Updated WBS to reflect Option B recovery. New tasks created and assigned.", 2.0, [], ["wbs","planning"]);
+    add("2026-05-12", "16:00", "EMP-001", "P-001", null,         "note",     "Reminder — call Felipe re: instrumentation", "Need to coordinate instrumentation interfaces with Felipe by Thu.", null, [], ["followup","instrumentation"]);
+    add("2026-05-13", "09:00", "EMP-001", "P-001", null,         "comm",     "Call with Felipe (Instr.)", "Coordinated instrumentation interfaces on hydrogen package. No conflicts identified.", 1.0, [], ["instrumentation","coordination"]);
+    add("2026-05-13", "13:30", "EMP-001", "P-001", "DEL-0017",  "work",     "HAZOP final close-out", "HAZOP fully closed. All actions tracked into the action register.", 1.0, [], ["hazop","closeout"]);
+    add("2026-05-14", "08:30", "EMP-001", "P-001", null,         "blocker",  "Still waiting on CR-002 decision", "Client missed Wed deadline. Going to escalate to PD on Mon if not received.", null, [], ["client","blocker"]);
+    add("2026-05-14", "11:00", "EMP-001", "P-001", null,         "meeting",  "Internal team standup", "Discussed CR-002 holdup with team. Continuing in parallel where possible.", 0.5, [], ["standup","team"]);
+    add("2026-05-14", "15:00", "EMP-001", "P-001", null,         "work",     "Drafted PD escalation", "Drafted escalation to Project Director re: client decision delay. Will send Mon morning.", 1.5, [], ["escalation","admin"]);
+    add("2026-05-15", "09:00", "EMP-001", "P-001", null,         "work",     "Weekly progress report", "Compiled Wk20 progress report. Used auto-summary from log.", 1.0, [], ["report","admin"]);
+    add("2026-05-15", "13:00", "EMP-001", "P-002", null,         "comm",     "EXP-204 cost review with commercial", "Walked through latest forecast. All within tolerance. No actions.", 1.0, [], ["cost","review"]);
+    add("2026-05-18", "08:15", "EMP-001", "P-001", null,         "meeting",  "Client steerco", "CR-002 decision received Mon morning — approved Option A. Schedule impact minimal.", 1.5, [], ["client","steerco"]);
+    add("2026-05-18", "11:00", "EMP-001", "P-001", null,         "work",     "Updated forecast with CR-002 outcome", "Updated forecast and schedule with approved CR-002 outcome. Forecast now back to amber.", 2.0, [], ["forecast","change"]);
+    add("2026-05-19", "08:00", "EMP-001", "P-001", null,         "meeting",  "Internal team standup", "Team aligned on revised schedule. Mech & Civil to focus on next milestone.", 0.5, [], ["standup","team"]);
+    add("2026-05-19", "10:30", "EMP-001", "P-001", "DEL-0006",  "work",     "Stress Rev B client review feedback", "Client returned 4 minor comments on Stress Rev B. Tracked to Yusuf for resolution.", 1.0, [], ["mechanical","feedback"]);
+
+    // ——— EMP-014 (Yusuf, Mech Lead on GFB-101) — sample week ———
+    add("2026-05-11", "08:00", "EMP-014", "P-001", "DEL-0006", "work",   "Stress analysis Rev B final review", "Final walk-through with team. Issued for client.", 3.0, [], ["mechanical","stress"]);
+    add("2026-05-11", "14:00", "EMP-014", "P-001", null,      "meeting","Discipline lead sync", "Synced with PM and other leads.", 1.0, [], ["sync"]);
+    add("2026-05-12", "09:00", "EMP-014", "P-001", null,      "work",   "Started piping isometrics for unit 200", "Started detailed isometrics for piping in unit 200.", 4.0, [], ["piping"]);
+    add("2026-05-13", "10:00", "EMP-014", "P-001", "DEL-0006","comm",   "Vendor follow-up", "Followed up with Linde on remaining vent silencer drawings.", 0.5, [{kind:"email",label:"Linde drawings",value:"mailto:projects.eu@linde.com"}], ["vendor"]);
+    add("2026-05-14", "08:30", "EMP-014", "P-001", null,      "blocker","Need decision on header thickness", "Process group has 2 options for header thickness. Need PM to escalate to client for decision.", null, [], ["process","blocker"]);
+    add("2026-05-15", "11:00", "EMP-014", "P-002", null,      "work",   "Started EXP-204 review", "Reviewed mech inputs for EXP-204 baseline.", 2.0, [], ["exp-204"]);
+    add("2026-05-18", "09:00", "EMP-014", "P-001", "DEL-0006","work",   "Client comments on Stress Rev B", "Reviewing 4 client comments. 2 minor, 2 require process input.", 2.5, [], ["mechanical","comments"]);
+    add("2026-05-19", "08:30", "EMP-014", "P-001", null,      "meeting","Standup", "Team standup, reviewed open actions.", 0.5, [], ["standup"]);
+
+    return out;
+  })();
+
+  // ============================================
   // DERIVED METRICS — single source of truth
   // All screens read from these helpers (not hardcoded numbers)
   // ============================================
@@ -462,6 +563,132 @@ window.DB = (function () {
   function changeById(id) { return changes.find(c => c.change_id === id); }
   function approvalById(id) { return approvals.find(a => a.approval_id === id); }
   function costByProject(pid) { return costs.find(c => c.project_id === pid); }
+  function dailyLogEntryById(id) { return dailyLogEntries.find(e => e.entry_id === id); }
+
+  // ============================================
+  // DAILY LOG HELPERS
+  // ============================================
+
+  // Return all entries for an employee, optionally filtered.
+  function dailyLogByEmployee(empId, opts) {
+    opts = opts || {};
+    let list = dailyLogEntries.filter(e => e.employee_id === empId);
+    if (opts.project_id)    list = list.filter(e => e.project_id === opts.project_id);
+    if (opts.from)          list = list.filter(e => e.created_at >= opts.from);
+    if (opts.to)            list = list.filter(e => e.created_at <= opts.to);
+    if (opts.entry_type)    list = list.filter(e => e.entry_type === opts.entry_type);
+    if (opts.search) {
+      const q = opts.search.toLowerCase();
+      list = list.filter(e =>
+        (e.title || "").toLowerCase().includes(q) ||
+        (e.body || "").toLowerCase().includes(q) ||
+        (e.tags || []).some(t => t.toLowerCase().includes(q))
+      );
+    }
+    // Most-recent first
+    return list.sort((a,b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  // Group an employee's entries by ISO date (YYYY-MM-DD)
+  function dailyLogByDay(empId, opts) {
+    const list = dailyLogByEmployee(empId, opts);
+    const byDay = {};
+    for (const e of list) {
+      const day = e.created_at.slice(0, 10);
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push(e);
+    }
+    // Each day's entries earliest-first (so morning entries appear top of day)
+    for (const day in byDay) byDay[day].sort((a,b) => a.created_at.localeCompare(b.created_at));
+    // Return ordered array of {day, entries} most-recent day first
+    return Object.keys(byDay).sort().reverse().map(day => ({ day, entries: byDay[day] }));
+  }
+
+  // All entries on a project (any employee) — for "Project log" view in project detail
+  function dailyLogByProject(projectId, opts) {
+    opts = opts || {};
+    let list = dailyLogEntries.filter(e => e.project_id === projectId);
+    if (opts.employee_id)   list = list.filter(e => e.employee_id === opts.employee_id);
+    if (opts.from)          list = list.filter(e => e.created_at >= opts.from);
+    if (opts.to)            list = list.filter(e => e.created_at <= opts.to);
+    if (opts.entry_type)    list = list.filter(e => e.entry_type === opts.entry_type);
+    return list.sort((a,b) => b.created_at.localeCompare(a.created_at));
+  }
+
+  // Build a weekly report for one employee over a week window.
+  // weekStart is "YYYY-MM-DD" (any day in the desired week — we normalize to Monday).
+  function weeklyReport(empId, weekStart) {
+    // Normalize to Monday
+    const d = new Date(weekStart + "T00:00:00Z");
+    const dayOfWeek = (d.getUTCDay() + 6) % 7; // 0 = Monday
+    const monday = new Date(d.getTime() - dayOfWeek * 86400000);
+    const sunday = new Date(monday.getTime() + 6 * 86400000);
+    const fromISO = monday.toISOString().slice(0, 10) + "T00:00:00Z";
+    const toISO   = sunday.toISOString().slice(0, 10) + "T23:59:59Z";
+
+    const entries = dailyLogByEmployee(empId, { from: fromISO, to: toISO });
+    const employee = employeeById(empId);
+
+    // Group by project
+    const byProject = {};
+    for (const e of entries) {
+      const key = e.project_id || "__none__";
+      if (!byProject[key]) {
+        const proj = e.project_id ? projectById(e.project_id) : null;
+        byProject[key] = {
+          project: proj,
+          entries: [],
+          totalHours: 0,
+          highlights: [],   // type="work" entries
+          blockers: [],     // type="blocker" entries
+          communications: [], // type="comm"
+          meetings: [],     // type="meeting"
+          notes: [],        // type="note"
+          deliverables: new Set(),
+        };
+      }
+      const bucket = byProject[key];
+      bucket.entries.push(e);
+      if (e.hours) bucket.totalHours += e.hours;
+      if (e.deliverable_id) bucket.deliverables.add(e.deliverable_id);
+      switch (e.entry_type) {
+        case "work":    bucket.highlights.push(e); break;
+        case "blocker": bucket.blockers.push(e); break;
+        case "comm":    bucket.communications.push(e); break;
+        case "meeting": bucket.meetings.push(e); break;
+        case "note":    bucket.notes.push(e); break;
+      }
+    }
+
+    // Convert to sorted array
+    const projectGroups = Object.values(byProject)
+      .map(g => ({ ...g, deliverables: Array.from(g.deliverables) }))
+      .sort((a, b) => b.totalHours - a.totalHours);
+
+    const totalHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+    const totalBlockers = entries.filter(e => e.entry_type === "blocker").length;
+    const totalMeetings = entries.filter(e => e.entry_type === "meeting").length;
+    const totalCommunications = entries.filter(e => e.entry_type === "comm").length;
+    const distinctProjects = projectGroups.filter(g => g.project).length;
+
+    return {
+      employee,
+      weekStart: monday.toISOString().slice(0, 10),
+      weekEnd:   sunday.toISOString().slice(0, 10),
+      isoWeek: U.isoWeek(monday),
+      year: monday.getUTCFullYear(),
+      entries,
+      projectGroups,
+      summary: {
+        totalEntries: entries.length,
+        totalHours,
+        totalBlockers,
+        totalMeetings,
+        totalCommunications,
+        distinctProjects,
+      },
+    };
+  }
 
   // Today (fixed for prototype) — used in date math
   const TODAY = new Date("2026-05-19T00:00:00Z");
@@ -811,16 +1038,18 @@ window.DB = (function () {
     // Source data
     roles, disciplineNames, employees, users, projects, activeProject, disciplines, assignments,
     planningWeeks, allocations, deliverables, costs, risks, approvals, changes, milestones,
-    documents, notifications,
+    documents, notifications, dailyLogEntries,
     // Lookup helpers
     employeeById, projectById, projectByCode, deliverableById, changeById, approvalById,
-    costByProject,
+    costByProject, dailyLogEntryById,
     // Derived metrics
     portfolioKPIs, disciplineUtilization, projectMetrics,
     riskSummary, changeImpact, approvalSummary, deliverableSummary,
     weeklyBurn, monthlyBurn, projectSCurve,
     employeeAllocation, employeeWeekHours,
     analyticsKPIs, clientConcentration, projectTypeMix,
+    // Daily log
+    dailyLogByEmployee, dailyLogByDay, dailyLogByProject, weeklyReport,
     TODAY,
   };
 })();

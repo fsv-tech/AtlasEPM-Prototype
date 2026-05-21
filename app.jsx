@@ -40,6 +40,10 @@ function App() {
   let screen;
   switch (r.route) {
     case "dashboard":  screen = <ScreenDashboard role={role}/>; break;
+    case "daily-log":
+      if (r.parts[0] === "weekly")     screen = <ScreenWeeklyReport employeeId="EMP-001" weekStart={r.parts[1]}/>;
+      else                              screen = <ScreenDailyLog employeeId="EMP-001"/>;
+      break;
     case "projects":
       if (!r.parts[0])                screen = <ScreenProjectsList/>;
       else if (r.parts[0] === "new")  screen = <ScreenProjectCreate/>;
