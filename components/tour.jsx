@@ -8,71 +8,102 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
   const [autoplay, setAutoplay] = React.useState(initialAutoplay !== false);
   const [speed, setSpeed] = React.useState("normal");
   const [rect, setRect] = React.useState(null);
-  const [animating, setAnimating] = React.useState(false);
+  const [targetReady, setTargetReady] = React.useState(false);
 
   const step = steps[idx];
   const speedMs = { slow: 8000, normal: 5500, fast: 3000 }[speed];
 
+  // Navigate + locate the step's target element.
+  // Re-runs every time idx changes. Always navigates to the exact step.route
+  // (no "if it starts with..." fuzziness — that's what made the tour feel stuck).
   React.useEffect(() => {
     if (!step) return;
 
+    setTargetReady(false);
+
+    // Always force the hash to the step's exact route so the right screen renders.
     if (step.route) {
       const wantHash = "#/" + step.route;
-      if (location.hash !== wantHash && !location.hash.startsWith(wantHash + "/")) {
+      if (location.hash !== wantHash) {
         location.hash = wantHash;
       }
     }
 
-    if (!step.selector) setRect(null);
-
-    setAnimating(true);
-    const animOff = setTimeout(() => setAnimating(false), 560);
-
-    let raf, last = null, didInitialScroll = false;
-
-    function tick() {
-      const el = step.selector ? document.querySelector(step.selector) : null;
-      if (!el) {
-        if (last !== null) { setRect(null); last = null; }
-      } else {
-        const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) {
-          if (!didInitialScroll) {
-            didInitialScroll = true;
-            const cs = getComputedStyle(el);
-            const stickyOrFixed = cs.position === "sticky" || cs.position === "fixed";
-            const inView = r.top >= 8 && r.bottom <= window.innerHeight - 8;
-            if (!inView && !stickyOrFixed) {
-              const targetY = window.scrollY + r.top - (window.innerHeight - r.height) / 2;
-              window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
-            }
-          }
-          if (!last ||
-              Math.abs(r.left   - last.left)   > 0.5 ||
-              Math.abs(r.top    - last.top)    > 0.5 ||
-              Math.abs(r.width  - last.width)  > 0.5 ||
-              Math.abs(r.height - last.height) > 0.5) {
-            last = { left: r.left, top: r.top, width: r.width, height: r.height };
-            setRect(last);
-          }
-        }
-      }
-      raf = requestAnimationFrame(tick);
+    if (!step.selector) {
+      // No selector → centered modal. Mark ready so the tooltip animates in.
+      setRect(null);
+      setTargetReady(true);
+      return;
     }
-    raf = requestAnimationFrame(tick);
 
-    return () => { cancelAnimationFrame(raf); clearTimeout(animOff); };
-  }, [idx, step]);
+    // Try to find the target element. Retry until found (with a cap).
+    // This handles: 1) route change still in flight, 2) lazy mount,
+    // 3) charts that draw async, 4) fonts/images that shift layout.
+    let raf;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 60; // ~1 sec at 60fps before giving up and centering
+    let last = null;
+    let didInitialScroll = false;
 
-  // Autoplay
+    function findAndTrack() {
+      const el = document.querySelector(step.selector);
+      if (!el || el.getBoundingClientRect().width === 0) {
+        attempts++;
+        if (attempts < MAX_ATTEMPTS) {
+          raf = requestAnimationFrame(findAndTrack);
+        } else {
+          // Give up — show centered tooltip instead of nothing
+          setRect(null);
+          setTargetReady(true);
+        }
+        return;
+      }
+
+      const r = el.getBoundingClientRect();
+
+      // First time we see it: scroll into view if needed, then mark ready.
+      if (!didInitialScroll) {
+        didInitialScroll = true;
+        const cs = getComputedStyle(el);
+        const stickyOrFixed = cs.position === "sticky" || cs.position === "fixed";
+        const margin = 24;
+        const inView = r.top >= margin && r.bottom <= window.innerHeight - margin;
+        if (!inView && !stickyOrFixed) {
+          // Account for header/topbar (~64px)
+          const targetY = window.scrollY + r.top - Math.max(80, (window.innerHeight - r.height) / 2);
+          window.scrollTo({ top: Math.max(0, targetY), behavior: "smooth" });
+        }
+        setTargetReady(true);
+      }
+
+      // Update rect if it moved (scroll, layout shift, animation, etc.)
+      if (!last ||
+          Math.abs(r.left   - last.left)   > 0.5 ||
+          Math.abs(r.top    - last.top)    > 0.5 ||
+          Math.abs(r.width  - last.width)  > 0.5 ||
+          Math.abs(r.height - last.height) > 0.5) {
+        last = { left: r.left, top: r.top, width: r.width, height: r.height };
+        setRect(last);
+      }
+
+      // Keep tracking forever (cheap — no work if nothing changed)
+      raf = requestAnimationFrame(findAndTrack);
+    }
+    raf = requestAnimationFrame(findAndTrack);
+
+    return () => { if (raf) cancelAnimationFrame(raf); };
+  }, [idx]); // only on step change
+
+  // Autoplay — pause when target isn't ready yet so user doesn't miss the step.
+  // Gives a small grace period (300ms) after target becomes ready before counting down.
   React.useEffect(() => {
-    if (!autoplay) return;
+    if (!autoplay || !targetReady) return;
     const t = setTimeout(() => {
       if (idx < steps.length - 1) setIdx(idx + 1);
       else setAutoplay(false);
-    }, speedMs);
+    }, speedMs + 300);
     return () => clearTimeout(t);
-  }, [idx, autoplay, speedMs, steps.length]);
+  }, [idx, autoplay, speedMs, steps.length, targetReady]);
 
   // Keyboard
   React.useEffect(() => {
@@ -86,6 +117,15 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [steps.length, onClose]);
 
+  // Pause autoplay if the user switches tab / window loses focus
+  React.useEffect(() => {
+    function onVis() {
+      if (document.hidden) setAutoplay(false);
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
   const tooltipW = 400;
   const tooltipH = 340;
   const tooltipPos = React.useMemo(() => {
@@ -94,23 +134,32 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
     }
     const vw = window.innerWidth, vh = window.innerHeight;
     const pad = 16, minTop = 72, minLeft = 16;
-    const fitsRight  = rect.right + pad + tooltipW + minLeft <= vw;
-    const fitsLeft   = rect.left - pad - tooltipW            >= minLeft;
-    const fitsBelow  = rect.bottom + pad + tooltipH + minLeft <= vh;
-    const fitsAbove  = rect.top - pad - tooltipH             >= minTop;
+    const fitsRight  = rect.left + rect.width + pad + tooltipW + minLeft <= vw;
+    const fitsLeft   = rect.left - pad - tooltipW                          >= minLeft;
+    const fitsBelow  = rect.top + rect.height + pad + tooltipH + minLeft  <= vh;
+    const fitsAbove  = rect.top - pad - tooltipH                           >= minTop;
 
     const alignV = () => Math.max(minTop, Math.min(vh - tooltipH - minLeft, rect.top + rect.height/2 - tooltipH/2));
     const alignH = () => Math.max(minLeft, Math.min(vw - tooltipW - minLeft, rect.left + rect.width/2 - tooltipW/2));
 
-    if (fitsRight)  return { left: rect.right + pad,           top: alignV(),  side: "right"  };
-    if (fitsLeft)   return { left: rect.left - pad - tooltipW, top: alignV(),  side: "left"   };
-    if (fitsBelow)  return { left: alignH(),                   top: rect.bottom + pad, side: "bottom" };
-    if (fitsAbove)  return { left: alignH(),                   top: rect.top - pad - tooltipH, side: "top" };
+    if (fitsRight)  return { left: rect.left + rect.width + pad,  top: alignV(),  side: "right"  };
+    if (fitsLeft)   return { left: rect.left - pad - tooltipW,    top: alignV(),  side: "left"   };
+    if (fitsBelow)  return { left: alignH(),                      top: rect.top + rect.height + pad, side: "bottom" };
+    if (fitsAbove)  return { left: alignH(),                      top: rect.top - pad - tooltipH, side: "top" };
     return { left: vw/2 - tooltipW/2, top: vh - tooltipH - 24, side: "floating" };
   }, [rect]);
 
   const cutout = rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null;
   const sectionColor = step?.color || "#2563EB";
+
+  // Smooth transition tokens — applied always (not just during initial animation
+  // window). This is what fixes the "lazy" feel: as the page scrolls or layout
+  // shifts, both the cutout and tooltip glide rather than snap.
+  const transitionAll = "left 380ms cubic-bezier(0.22, 1, 0.36, 1), top 380ms cubic-bezier(0.22, 1, 0.36, 1), width 380ms cubic-bezier(0.22, 1, 0.36, 1), height 380ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease";
+
+  // While target isn't ready, fade the spotlight out so it doesn't show stale rect from prev step
+  const spotlightOpacity = targetReady ? 1 : 0;
+  const tooltipOpacity   = targetReady ? 1 : 0.35;
 
   return ReactDOM.createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 200, pointerEvents: "none" }}>
@@ -125,7 +174,8 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
             `0 0 0 2px ${sectionColor} inset, ` +
             `0 0 0 6px ${sectionColor}33 inset`,
           pointerEvents: "auto",
-          transition: animating ? "all 520ms cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+          transition: transitionAll,
+          opacity: spotlightOpacity,
         }}/>
       ) : (
         <div style={{
@@ -133,6 +183,8 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
           background: "rgba(8, 13, 28, 0.65)",
           backdropFilter: "blur(2px)",
           pointerEvents: "auto",
+          transition: "opacity 240ms ease",
+          opacity: targetReady ? 1 : 0.6,
         }}/>
       )}
 
@@ -145,9 +197,8 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
         boxShadow: "0 32px 64px rgba(15,23,41,0.32), 0 4px 12px rgba(15,23,41,0.10)",
         pointerEvents: "auto",
         overflow: "hidden",
-        transition: animating
-          ? "left 520ms cubic-bezier(0.22, 1, 0.36, 1), top 520ms cubic-bezier(0.22, 1, 0.36, 1)"
-          : "none",
+        transition: transitionAll,
+        opacity: tooltipOpacity,
       }}>
         <div style={{ height: 4, background: `linear-gradient(90deg, ${sectionColor} 0%, ${sectionColor}88 100%)` }}/>
         <div style={{ padding: "16px 18px 12px", background: `linear-gradient(135deg, ${sectionColor}14 0%, ${sectionColor}04 60%)`, borderBottom: "1px solid var(--line)" }}>
@@ -188,8 +239,24 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
           )}
         </div>
 
+        {/* Per-step countdown — fills up over speedMs when autoplay is on */}
+        <div style={{ height: 2, background: "var(--surface-3)", position: "relative", overflow: "hidden" }}>
+          {autoplay && targetReady && (
+            <div
+              key={idx + ":" + speed}  // restart animation when step or speed changes
+              style={{
+                position: "absolute", left: 0, top: 0, bottom: 0, width: "100%",
+                background: `${sectionColor}66`,
+                transformOrigin: "left center",
+                animation: `tour-countdown ${speedMs + 300}ms linear forwards`,
+              }}
+            />
+          )}
+        </div>
+
+        {/* Overall progress through the tour */}
         <div style={{ height: 3, background: "var(--surface-3)" }}>
-          <div style={{ height: "100%", width: `${((idx + 1) / steps.length) * 100}%`, background: `linear-gradient(90deg, ${sectionColor} 0%, ${sectionColor}AA 100%)`, transition: "width 520ms cubic-bezier(0.22, 1, 0.36, 1)" }}/>
+          <div style={{ height: "100%", width: `${((idx + 1) / steps.length) * 100}%`, background: `linear-gradient(90deg, ${sectionColor} 0%, ${sectionColor}AA 100%)`, transition: "width 380ms cubic-bezier(0.22, 1, 0.36, 1)" }}/>
         </div>
 
         <div style={{ padding: "10px 14px", background: "var(--surface-2)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -239,6 +306,10 @@ function Tour({ steps, onClose, autoplay: initialAutoplay }) {
         @keyframes tour-pulse {
           0%, 100% { opacity: 0.5; transform: scale(1); }
           50%      { opacity: 0.95; transform: scale(1.012); }
+        }
+        @keyframes tour-countdown {
+          from { transform: scaleX(0); }
+          to   { transform: scaleX(1); }
         }
       `}</style>
     </div>,
