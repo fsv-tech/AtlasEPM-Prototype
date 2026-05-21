@@ -282,32 +282,60 @@ Follow the phase plan in `docs/04`. For each module:
 5. **Row-level security** policy in Postgres for that entity
 6. **Tests:** unit test the API route with Vitest; smoke test the page with Playwright
 
-Sample route:
+### 7a. Port the derivation helpers as analytics endpoints
+
+The prototype's `data/index.js` includes a set of helpers that serve as the
+single source of truth for every aggregated number in the UI. Port each one
+to a server-side analytics route. Implementations must read from source
+tables — never from a denormalised KPI table — and may be cached for ≤ 5 min.
+
+| Helper (prototype) | Endpoint (server) | Notes |
+|---|---|---|
+| `portfolioKPIs()` | `GET /api/analytics/portfolio` | Active project count, budget/spent/forecast totals, open risks, utilization |
+| `disciplineUtilization()` | `GET /api/analytics/disciplines` | Sum of `project_assignments.allocation_pct` ÷ employee count, per discipline |
+| `weeklyBurn(n)` / `monthlyBurn(n)` | `GET /api/analytics/burn-rate?period=&window=` | Distribute `costs.spent` across project lifetime using S-curve (tanh) function — see helper code |
+| `projectSCurve(id)` | `GET /api/projects/:id/s-curve` | Anchor actual[currentIdx] = `projects.progress`; lag by health (-4pp amber, -8pp red); forecast linear to end |
+| `riskSummary()` | `GET /api/analytics/risks` | Group by status × severity; status="Open" only for the "open" count |
+| `changeImpact()` | `GET /api/analytics/changes` | Exclude `status='Rejected'` from net cost/schedule totals |
+| `approvalSummary()` | `GET /api/analytics/approvals` | Avg cycle = mean(approved_date − raised) for status='Approved'; SLA = 5 days |
+| `deliverableSummary()` | `GET /api/analytics/deliverables` | On-time % = count(actual_date ≤ planned_date) ÷ count(actual_date IS NOT NULL) |
+| `analyticsKPIs()` | `GET /api/analytics/insights` | Revenue earned = Σ(budget × progress / 100); best/worst by variance / budget |
+| `clientConcentration()` | `GET /api/analytics/clients` | Σ earned revenue grouped by client, sorted desc |
+| `projectTypeMix()` | `GET /api/analytics/project-types` | Count + Σ budget grouped by project_type |
+| `employeeAllocation(id)` | `GET /api/employees/:id/utilization` | Σ allocation_pct across all active assignments |
+
+**Why this matters.** The prototype's reviewer feedback was: *"Dashboard looks
+impressive, but the devil is in detail — try get the source data right."* That
+feedback applies in production: if these helpers don't share a code path,
+different screens will drift apart and report contradictory numbers. Build
+each helper once on the server, expose via the routes above, and have every
+client component consume from there. Never compute the same KPI in two places.
+
+### 7b. Acceptance tests for analytics endpoints
+
+Write Vitest tests that assert reconciliation between endpoints:
 
 ```ts
-// app/api/projects/route.ts
-import { auth } from "@/app/api/auth/[...nextauth]/route";
-import { db } from "@/db/client";
-import { projects } from "@/db/schema";
-import { NextResponse } from "next/server";
+test("dashboard.openRisks equals analytics.risks.open", async () => {
+  const portfolio = await GET("/api/analytics/portfolio");
+  const risks     = await GET("/api/analytics/risks");
+  expect(portfolio.openRisks).toBe(risks.open);
+});
 
-export async function GET(req: Request) {
-  const session = await auth();
-  if (!session) return new Response("Unauthorized", { status: 401 });
+test("monthly burn sum matches portfolio.spentTotal within 5%", async () => {
+  const portfolio = await GET("/api/analytics/portfolio");
+  const burn      = await GET("/api/analytics/burn-rate?period=monthly&window=24");
+  const sum       = burn.reduce((s, m) => s + m.value, 0) * 1e6;
+  expect(Math.abs(sum - portfolio.spentTotal) / portfolio.spentTotal).toBeLessThan(0.05);
+});
 
-  // RLS context — Postgres will filter rows based on these
-  await db.execute(`SET LOCAL atlas.role = '${session.user.role}'`);
-  await db.execute(`SET LOCAL atlas.employee_id = '${session.user.employeeId}'`);
-
-  const url = new URL(req.url);
-  const status = url.searchParams.get("status");
-  const list = await db.query.projects.findMany({
-    where: status ? (p, { eq }) => eq(p.status, status) : undefined,
-    with: { pm: true },
-    orderBy: (p, { desc }) => [desc(p.updated_at)],
-  });
-  return NextResponse.json({ data: list });
-}
+test("best/worst performer derives from costs.variance", async () => {
+  const analytics = await GET("/api/analytics/insights");
+  const costs     = await GET("/api/costs");
+  const sorted = [...costs.data].sort((a,b) => a.variance/a.budget - b.variance/b.budget);
+  expect(analytics.best.project_code).toBe(sorted[0].project_code);
+  expect(analytics.worst.project_code).toBe(sorted.at(-1).project_code);
+});
 ```
 
 ---

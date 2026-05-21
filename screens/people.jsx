@@ -162,8 +162,21 @@ function ScreenEmployeeDetail({ employeeId }) {
   const allocation = projectsOn.reduce((s,a)=>s+a.allocation_pct,0);
   const deliverablesOwned = DB.deliverables.filter(d => d.owner_employee_id === e.employee_id);
 
-  // synthetic utilization over 12 weeks
-  const utilHistory = [72,78,80,86,90,88,92,94,96,98,allocation,allocation];
+  // YTD hours — sum employee's actual_hours from allocations time-series (past weeks)
+  const empAllocs = DB.allocations.filter(a => a.employee_id === e.employee_id);
+  const ytdHours = empAllocs.reduce((s,a) => s + (a.actual_hours || 0), 0);
+  // YTD capacity ≈ weeks-elapsed-this-year × 40h
+  const today = DB.TODAY;
+  const yearStart = new Date(Date.UTC(today.getUTCFullYear(), 0, 1));
+  const weeksThisYear = Math.max(1, Math.round((today - yearStart) / (7 * 86400000)));
+  const ytdCapacity = weeksThisYear * e.capacity_hours;
+  const ytdPct = ytdCapacity > 0 ? Math.round(ytdHours / ytdCapacity * 100) : 0;
+
+  // Utilization history — derived from this employee's weekly allocations
+  const utilHistory = DB.planningWeeks.map(w => {
+    const h = DB.employeeWeekHours(e.employee_id, w.index);
+    return Math.round(h / 40 * 100);
+  }).slice(0, 12);
 
   return (
     <div className="content" data-tour-id="page">
@@ -205,8 +218,8 @@ function ScreenEmployeeDetail({ employeeId }) {
           <KPI label="Current utilization" icon="activity" value={allocation + "%"} foot={allocation > 100 ? "OVER capacity" : "of capacity"} deltaDir={allocation > 100 ? "down" : "up"}/>
           <KPI label="Active projects" icon="folder" value={projectsOn.length}/>
           <KPI label="Deliverables owned" icon="layers" value={deliverablesOwned.length} foot={deliverablesOwned.filter(d => d.status === "Approved").length + " approved"}/>
-          <KPI label="YTD hours" icon="clock" value="1,284" foot="62% of YTD capacity"/>
-          <KPI label="Rate / fee" icon="dollar" value={"$" + e.hourly_rate} unit="/h" foot={`Fee factor 2.75× · $${(e.hourly_rate*2.75).toFixed(0)} effective`}/>
+          <KPI label="YTD hours" icon="clock" value={ytdHours.toLocaleString()} foot={ytdPct + "% of " + ytdCapacity.toLocaleString() + "h capacity"}/>
+          <KPI label="Rate" icon="dollar" value={"$" + e.hourly_rate} unit="/h" foot="standard hourly rate"/>
         </div>
       </div>
 
@@ -245,7 +258,12 @@ function ScreenEmployeeDetail({ employeeId }) {
                     <td><span className="badge outline" style={{ fontSize: 10 }}>{a.discipline}</span></td>
                     <td style={{ width: 160 }}><ProgressWithLabel value={a.allocation_pct}/></td>
                     <td><span className="mono tiny">{U.fmtDate(a.start_date)} – {U.fmtDate(a.end_date)}</span></td>
-                    <td className="cell-num">{Math.round(a.allocation_pct * 0.4 * 32)}h</td>
+                    <td className="cell-num">{(() => {
+                      const projHrs = DB.allocations
+                        .filter(al => al.employee_id === e.employee_id && al.project_id === a.project_id)
+                        .reduce((s,al) => s + (al.actual_hours || 0), 0);
+                      return projHrs.toLocaleString() + "h";
+                    })()}</td>
                   </tr>
                 );
               })}
@@ -257,29 +275,54 @@ function ScreenEmployeeDetail({ employeeId }) {
       {tab === "skills" && (
         <div className="grid" style={{ gridTemplateColumns: "1.5fr 1fr" }}>
           <div className="card">
-            <CardH title="Skills & expertise"/>
+            <CardH title="Skills & expertise" subtitle="Self-assessed proficiency"/>
             <div className="col" style={{ gap: 10 }}>
-              {e.skills.map((s, i) => {
-                const level = 90 - i*8 - (i%2)*7;
-                return (
-                  <div key={s} className="row" style={{ gap: 10 }}>
-                    <span style={{ width: 180, fontSize: 12.5 }}>{s}</span>
-                    <div className="progress" style={{ flex: 1, height: 6 }}><span style={{ width: level + "%", background: "var(--accent)" }}/></div>
-                    <span className="mono tiny" style={{ width: 32, textAlign: "right" }}>{level}%</span>
-                  </div>
-                );
-              })}
+              {(() => {
+                const seed = e.employee_id.split("-").pop() | 0;
+                const rand = U.deterministicRand(seed);
+                // Seniority gives a base level; rand adds variation
+                const base = { Junior: 50, Mid: 65, Senior: 80, Lead: 88, Principal: 92 }[e.seniority_level] || 70;
+                return e.skills.map((s, i) => {
+                  const level = Math.min(100, Math.max(20, Math.round(base + (rand() - 0.5) * 25 - i * 4)));
+                  return (
+                    <div key={s} className="row" style={{ gap: 10 }}>
+                      <span style={{ width: 180, fontSize: 12.5 }}>{s}</span>
+                      <div className="progress" style={{ flex: 1, height: 6 }}><span style={{ width: level + "%", background: level >= 80 ? "var(--accent)" : level >= 60 ? "var(--ink-3)" : "var(--ink-5)" }}/></div>
+                      <span className="mono tiny" style={{ width: 32, textAlign: "right" }}>{level}%</span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
           <div className="card">
             <CardH title="Certifications"/>
-            {["IChemE Chartered", "PMP", "ISO 9001 Lead Auditor", "OSHA 30"].map((c, i) => (
-              <div key={c} className="row" style={{ padding: "10px 0", borderBottom: i < 3 ? "1px solid var(--line)" : null, gap: 10 }}>
-                <Ico name="checkCircle" size={16} color="var(--green)"/>
-                <div style={{ flex: 1, fontSize: 13 }}>{c}</div>
-                <span className="muted tiny mono">2024-{(i+1)*3}</span>
-              </div>
-            ))}
+            {(() => {
+              // Discipline-appropriate certs
+              const certsByDiscipline = {
+                Mechanical:      ["IMechE Chartered", "API 510/570", "CAESAR II"],
+                Electrical:      ["IEEE Member", "IEC 61850", "ETAP Certified"],
+                Instrumentation: ["ISA Certified", "TÜV Functional Safety", "DCS Specialist"],
+                Structural:      ["ICE Chartered", "STAAD Pro", "PE Structural"],
+                Civil:           ["ICE Chartered", "FIDIC Contracts", "PE Civil"],
+                Process:         ["IChemE Chartered", "HAZOP Leader", "HYSYS Specialist"],
+                HSE:             ["NEBOSH Diploma", "ISO 45001 Lead Auditor", "TapRooT Investigator"],
+                PM:              ["PMP", "PRINCE2 Practitioner", "PMI-RMP"],
+                Procurement:     ["CIPS MCIPS", "FIDIC Contracts"],
+                Commercial:      ["RICS MRICS", "AACE CCP"],
+                DocCtrl:         ["IDC Certified", "EDMS Specialist"],
+                QA:              ["ASQ CQE", "ISO 9001 Lead Auditor"],
+                Architecture:    ["RIBA Chartered", "LEED AP"],
+              };
+              const certs = certsByDiscipline[e.discipline] || ["ISO 9001 Lead Auditor"];
+              return certs.map((c, i) => (
+                <div key={c} className="row" style={{ padding: "10px 0", borderBottom: i < certs.length - 1 ? "1px solid var(--line)" : null, gap: 10 }}>
+                  <Ico name="checkCircle" size={16} color="var(--green)"/>
+                  <div style={{ flex: 1, fontSize: 13 }}>{c}</div>
+                  <span className="muted tiny mono">2023</span>
+                </div>
+              ));
+            })()}
           </div>
         </div>
       )}
@@ -294,32 +337,61 @@ function ScreenEmployeeDetail({ employeeId }) {
       {tab === "availability" && (
         <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div className="card">
-            <CardH title="Utilization trend" subtitle="12-week rolling"/>
+            <CardH title="Utilization trend" subtitle="14-week rolling · planned hours / capacity"/>
             <Bars w={500} h={120} barW={28} gap={6} values={utilHistory}
-                  labels={Array.from({length:12}, (_,i)=>"W"+(9+i))}
+                  labels={DB.planningWeeks.slice(0, 12).map(w => w.label)}
                   colors={utilHistory.map(v => v > 100 ? "var(--red)" : v > 80 ? "var(--amber)" : "var(--accent)")}/>
             <div className="muted tiny" style={{ marginTop: 8 }}>
-              {e.full_name.split(" ")[0]} has averaged 88% utilization over the last 12 weeks · slightly above the 80% target.
+              {(() => {
+                const nonZero = utilHistory.filter(v => v > 0);
+                const avg = nonZero.length > 0 ? Math.round(nonZero.reduce((s,v)=>s+v,0) / nonZero.length) : 0;
+                return `${e.full_name.split(" ")[0]} averages ${avg}% utilization in the rolling window · target 80%.`;
+              })()}
             </div>
           </div>
           <div className="card">
-            <CardH title="Time off & exceptions"/>
-            {[
-              { date: "2026-06-22 → 2026-07-03", reason: "Annual leave", type: "leave", days: 10 },
-              { date: "2026-08-15", reason: "Public holiday — Indep. Day", type: "holiday", days: 1 },
-              { date: "2026-05-28", reason: "Training — STAAD masterclass", type: "training", days: 1 },
-            ].map((t, i) => (
-              <div key={i} className="row" style={{ padding: "10px 0", borderBottom: "1px solid var(--line)", gap: 10 }}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: t.type === "leave" ? "var(--blue-soft)" : t.type === "holiday" ? "var(--violet-soft)" : "var(--green-soft)", color: t.type === "leave" ? "var(--blue)" : t.type === "holiday" ? "var(--violet)" : "var(--green)", display: "grid", placeItems: "center" }}>
-                  <Ico name="calendar" size={13}/>
+            <CardH title="Time off & exceptions" subtitle="Annual leave, holidays, training"/>
+            {(() => {
+              // Per-employee deterministic time-off
+              const seed = e.employee_id.split("-").pop() | 0;
+              const rand = U.deterministicRand(seed);
+              const trainings = {
+                Mechanical:      "Piping stress (CAESAR II)",
+                Electrical:      "ETAP advanced systems",
+                Instrumentation: "DCS / SIS upgrade",
+                Structural:      "STAAD masterclass",
+                Civil:           "Drainage design workshop",
+                Process:         "HYSYS / Aspen training",
+                HSE:             "HAZOP leader refresher",
+                PM:              "PMI risk management",
+                Procurement:     "Contracts negotiation",
+                Commercial:      "Cost engineering update",
+                DocCtrl:         "EDMS administration",
+                QA:              "ISO 9001 auditor refresher",
+                Architecture:    "Sustainable design",
+              };
+              const monthBase = 6 + Math.floor(rand() * 3); // June-Aug
+              const leaveStart = new Date(Date.UTC(2026, monthBase, 1 + Math.floor(rand() * 20)));
+              const leaveDays = 7 + Math.floor(rand() * 7);
+              const leaveEnd = new Date(leaveStart.getTime() + leaveDays * 86400000);
+              const items = [
+                { date: U.fmtDate(leaveStart) + " → " + U.fmtDate(leaveEnd), reason: "Annual leave", type: "leave", days: leaveDays },
+                { date: U.fmtDate(new Date(Date.UTC(2026, 8, 3))), reason: "National Day", type: "holiday", days: 1 },
+                { date: U.fmtDate(new Date(Date.UTC(2026, 5, 28 + (seed % 4)))), reason: "Training — " + (trainings[e.discipline] || "Continuing education"), type: "training", days: 1 },
+              ];
+              return items.map((t, i) => (
+                <div key={i} className="row" style={{ padding: "10px 0", borderBottom: i < items.length - 1 ? "1px solid var(--line)" : null, gap: 10 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: t.type === "leave" ? "var(--blue-soft)" : t.type === "holiday" ? "var(--violet-soft)" : "var(--green-soft)", color: t.type === "leave" ? "var(--blue)" : t.type === "holiday" ? "var(--violet)" : "var(--green)", display: "grid", placeItems: "center" }}>
+                    <Ico name="calendar" size={13}/>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>{t.reason}</div>
+                    <div className="muted tiny">{t.date}</div>
+                  </div>
+                  <span className="mono tiny">{t.days}d</span>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>{t.reason}</div>
-                  <div className="muted tiny">{t.date}</div>
-                </div>
-                <span className="mono tiny">{t.days}d</span>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         </div>
       )}
@@ -329,31 +401,44 @@ function ScreenEmployeeDetail({ employeeId }) {
           <div className="table-head">
             <div className="table-head-l">
               <h3 className="card-title">Timesheets</h3>
-              <div className="muted tiny">Last 8 weeks</div>
+              <div className="muted tiny">Last weeks · derived from allocations</div>
             </div>
             <button className="btn sm"><Ico name="download" size={12}/>Export</button>
           </div>
           <table className="data">
             <thead><tr><th>Week</th><th>Project</th><th className="num">Hours</th><th className="num">Cost</th><th>Status</th></tr></thead>
             <tbody>
-              {Array.from({length:8}).map((_, i) => {
-                const wk = 13 + i;
-                const proj = projectsOn[i % Math.max(1, projectsOn.length)] || projectsOn[0];
-                const p = proj ? DB.projectById(proj.project_id) : DB.projects[0];
-                const hrs = Math.round(38 + (i%3)*2);
-                return (
+              {(() => {
+                // For each past week (week_index < current = 5), one row per project
+                const pastWeeks = DB.planningWeeks.filter(w => w.index < 5);
+                const rows = [];
+                pastWeeks.forEach(w => {
+                  DB.allocations
+                    .filter(a => a.employee_id === e.employee_id && a.week_index === w.index && (a.actual_hours || 0) > 0)
+                    .forEach(a => {
+                      const p = DB.projectById(a.project_id);
+                      if (!p) return;
+                      rows.push({ week: w, project: p, hours: a.actual_hours });
+                    });
+                });
+                if (rows.length === 0) {
+                  return <tr><td colSpan={5} className="muted" style={{ textAlign: "center", padding: 20 }}>No past timesheet entries.</td></tr>;
+                }
+                // Most recent first
+                rows.sort((a,b) => b.week.index - a.week.index);
+                return rows.map((r, i) => (
                   <tr key={i}>
-                    <td>W{wk} · 2026</td>
+                    <td className="mono tiny">{r.week.label} · {r.week.year}</td>
                     <td>
-                      <div className="cell-strong">{p.project_name}</div>
-                      <div className="cell-sub mono">{p.project_code}</div>
+                      <div className="cell-strong">{r.project.project_name}</div>
+                      <div className="cell-sub mono">{r.project.project_code}</div>
                     </td>
-                    <td className="num cell-num">{hrs}h</td>
-                    <td className="num cell-num">${(hrs * e.hourly_rate).toLocaleString()}</td>
-                    <td><Status value={i < 6 ? "Approved" : i === 6 ? "In Review" : "Draft"}/></td>
+                    <td className="num cell-num">{r.hours}h</td>
+                    <td className="num cell-num">${(r.hours * e.hourly_rate).toLocaleString()}</td>
+                    <td><Status value={r.week.index < 3 ? "Approved" : r.week.index === 3 ? "In Review" : "Draft"}/></td>
                   </tr>
-                );
-              })}
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -433,11 +518,11 @@ function ScreenCalendar() {
 
       {/* KPIs */}
       <div className="kpi-grid">
-        <KPI label="Engineers loaded" icon="users" value={empsWithAlloc.length}/>
-        <KPI label="Total planned hrs (wk 20)" icon="clock" value={empsWithAlloc.reduce((s,e)=>s+totalForEmp(e.employee_id, 5), 0).toLocaleString()}/>
-        <KPI label="Avg utilization" icon="activity" value="84%" delta="+3 vs target" deltaDir="up"/>
-        <KPI label="Over-allocated" icon="alertTri" value={empsWithAlloc.filter(e => totalForEmp(e.employee_id,5) > 40).length} delta="needs reshuffling" deltaDir="down"/>
-        <KPI label="Holiday conflicts" icon="alertCirc" value={2} foot="next 4 weeks"/>
+        <KPI label="Engineers loaded" icon="users" value={empsWithAlloc.length} foot={"of " + DB.employees.length + " total"}/>
+        <KPI label={"Planned hrs (" + (weeks.find(w=>w.isCurrent)?.label || "current") + ")"} icon="clock" value={empsWithAlloc.reduce((s,e)=>s+totalForEmp(e.employee_id, 5), 0).toLocaleString()} unit="h"/>
+        <KPI label="Avg utilization" icon="activity" value={empsWithAlloc.length > 0 ? Math.round(empsWithAlloc.reduce((s,e)=>s+totalForEmp(e.employee_id,5),0) / (empsWithAlloc.length * 40) * 100) + "%" : "—"} foot="of 40h/wk capacity" deltaDir="up"/>
+        <KPI label="Over-allocated" icon="alertTri" value={empsWithAlloc.filter(e => totalForEmp(e.employee_id,5) > 40).length} foot="this week >40h" deltaDir="down"/>
+        <KPI label="Near capacity" icon="alertCirc" value={empsWithAlloc.filter(e => { const h = totalForEmp(e.employee_id, 5); return h > 32 && h <= 40; }).length} foot="32-40h this week"/>
       </div>
 
       {/* Legend + filters */}
@@ -503,19 +588,36 @@ function ScreenCalendar() {
         ))}
       </div>
 
+      {(() => {
+        // Find engineers over-allocated in upcoming weeks
+        const overWeeks = [];
+        weeks.forEach(w => {
+          const overEmps = empsWithAlloc.filter(e => totalForEmp(e.employee_id, w.index) > 40);
+          if (overEmps.length > 0) overWeeks.push({ week: w, emps: overEmps });
+        });
+        if (overWeeks.length === 0) return null;
+        // Pick the worst week
+        const worstWeek = overWeeks.sort((a,b)=>b.emps.length-a.emps.length)[0];
+        const examples = worstWeek.emps.slice(0,2).map(e => {
+          const hrs = totalForEmp(e.employee_id, worstWeek.week.index);
+          return `${e.full_name.split(" ")[0]} ${e.full_name.split(" ").pop()} (${e.discipline}, ${hrs}h)`;
+        }).join(", ");
+        return (
       <div className="card" style={{ borderLeft: "3px solid var(--red)" }}>
         <div className="row" style={{ gap: 10, marginBottom: 6 }}>
           <Ico name="alertTri" size={16} color="var(--red)"/>
           <span style={{ fontWeight: 500 }}>Over-allocation detected</span>
         </div>
         <div className="muted" style={{ fontSize: 13 }}>
-          2 engineers exceed 100% allocation in W21–W22. Suggestion: shift Yusuf Korkmaz (Mech, 120%) partially to EXP-204, or bring forward Carlos Mendes (Struct, 88% capacity headroom).
+          {worstWeek.emps.length} engineer{worstWeek.emps.length === 1 ? "" : "s"} exceed 40h capacity in {worstWeek.week.label}: {examples}{worstWeek.emps.length > 2 ? ", and " + (worstWeek.emps.length - 2) + " more" : ""}. Consider redistributing load or extending timelines.
         </div>
         <div className="row" style={{ gap: 8, marginTop: 10 }}>
           <button className="btn sm">Auto-balance</button>
           <button className="btn sm">Open scenarios</button>
         </div>
       </div>
+        );
+      })()}
 
       {assignOpen && <AssignModal onClose={() => setAssignOpen(false)}/>}
       {filterOpen && <CalendarFilterModal onClose={() => setFilterOpen(false)} disciplines={disciplines}/>}
@@ -584,17 +686,27 @@ function AssignModal({ onClose }) {
           <input type="date" value={form.end} onChange={e => up("end", e.target.value)}/>
         </div>
       </div>
+      {(() => {
+        const currentAlloc = DB.employeeAllocation(emp.employee_id);
+        const projected = currentAlloc + Number(form.allocation);
+        const weeks = Math.max(1, Math.round((new Date(form.end) - new Date(form.start)) / (7 * 86400000)));
+        const cost = Math.round(emp.hourly_rate * form.allocation/100 * 40 * weeks);
+        return (
       <div style={{ marginTop: 16, padding: 12, background: "var(--surface-2)", borderRadius: 8 }}>
         <div className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>Impact preview</div>
         <div className="row" style={{ justifyContent: "space-between", fontSize: 13 }}>
           <span>{emp.full_name} — combined utilization</span>
-          <span className="mono" style={{ color: form.allocation > 50 ? "var(--amber)" : "var(--green)" }}>{form.allocation}% → projected {Math.min(120, 60+Number(form.allocation))}%</span>
+          <span className="mono" style={{ color: projected > 100 ? "var(--red)" : projected > 80 ? "var(--amber)" : "var(--green)" }}>
+            {currentAlloc}% → {projected}%
+          </span>
         </div>
         <div className="row" style={{ justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
           <span>Estimated cost ({proj.project_code})</span>
-          <span className="mono">${Math.round(emp.hourly_rate * form.allocation/100 * 40 * 12).toLocaleString()} / 12 weeks</span>
+          <span className="mono">${cost.toLocaleString()} / {weeks} weeks</span>
         </div>
       </div>
+        );
+      })()}
     </Modal>
   );
 }

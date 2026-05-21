@@ -407,16 +407,36 @@ function ProjectDisciplines({ p, disc }) {
           <div className="card">
             <CardH title="Alerts"/>
             <div className="col" style={{ gap: 8 }}>
-              {[
-                { l: "Stress analysis 4d overdue", k: "danger" },
-                { l: "Equipment datasheets in review", k: "amber" },
-                { l: "Interface to instrumentation open", k: "amber" },
-              ].map((a, i) => (
-                <div key={i} className="row" style={{ gap: 8, fontSize: 12, padding: 8, background: a.k === "danger" ? "var(--red-soft)" : "var(--amber-soft)", borderRadius: 6, color: a.k === "danger" ? "#9A1F1F" : "#92400E" }}>
-                  <Ico name="alertTri" size={13}/>
-                  <span>{a.l}</span>
-                </div>
-              ))}
+              {(() => {
+                const alerts = [];
+                // Overdue deliverables
+                dels.filter(d => {
+                  if (d.status === "Approved" || d.status === "Issued") return false;
+                  const days = Math.round((DB.TODAY - new Date(d.planned_date)) / 86400000);
+                  return d.status === "Delayed" || days > 0;
+                }).slice(0, 2).forEach(d => {
+                  const days = Math.round((DB.TODAY - new Date(d.planned_date)) / 86400000);
+                  alerts.push({ l: d.deliverable_code + (days > 0 ? ` ${days}d overdue` : " delayed"), k: "danger" });
+                });
+                // In Review deliverables
+                dels.filter(d => d.status === "In Review").slice(0, 2).forEach(d => {
+                  alerts.push({ l: d.deliverable_code + " awaiting review", k: "amber" });
+                });
+                // Open risks for this discipline (best-effort: those owned by this discipline's lead)
+                const discLeadId = cur.lead_employee_id;
+                DB.risks.filter(r => r.project_id === p.project_id && r.status === "Open" && r.owner === discLeadId).slice(0,1).forEach(r => {
+                  alerts.push({ l: r.title.slice(0,38), k: r.severity === "High" ? "danger" : "amber" });
+                });
+                if (alerts.length === 0) {
+                  return <div className="muted tiny" style={{ padding: "8px 0" }}>No active alerts.</div>;
+                }
+                return alerts.slice(0,4).map((a, i) => (
+                  <div key={i} className="row" style={{ gap: 8, fontSize: 12, padding: 8, background: a.k === "danger" ? "var(--red-soft)" : "var(--amber-soft)", borderRadius: 6, color: a.k === "danger" ? "#9A1F1F" : "#92400E" }}>
+                    <Ico name="alertTri" size={13}/>
+                    <span>{a.l}</span>
+                  </div>
+                ));
+              })()}
             </div>
           </div>
 
@@ -506,11 +526,24 @@ function ProjectDeliverables({ p, dels }) {
 // COST TAB
 // =========================================================
 function ProjectCost({ p, cost, disc }) {
-  // Recompute scenarios cheaply
-  const sCurveMonths = ["Sep 25","Oct","Nov","Dec","Jan 26","Feb","Mar","Apr","May","Jun","Jul","Aug 26"];
-  const planned  = [0,6,15,25,36,46,54,62,70,78,90,100];
-  const actual   = [0,5,14,23,33,42,50,58,68,74,null,null];
-  const forecast = [null,null,null,null,null,null,null,null,68,76,87,98];
+  // S-curve derived from project timeline and progress
+  const sCurve = DB.projectSCurve(p.project_id);
+  const sCurveMonths = sCurve.months.map(m => m.label);
+  const planned  = sCurve.planned;
+  const actual   = sCurve.actual;
+  const forecast = sCurve.forecast;
+
+  // Scenarios derived from this project's pending change requests
+  const projectChanges = DB.changes.filter(c => c.project_id === p.project_id && c.status !== "Approved");
+  const scenarioItems = projectChanges.slice(0, 4).map(c => ({
+    label: c.title,
+    delta: (c.cost_impact >= 0 ? "+$" : "-$") + Math.abs(c.cost_impact/1000).toFixed(0) + "K",
+    days:  (c.schedule_impact_days >= 0 ? "+" : "") + c.schedule_impact_days + " days",
+    cost:  c.cost_impact,
+    daysN: c.schedule_impact_days,
+  }));
+  const combinedCost = scenarioItems.reduce((s,x) => s + x.cost, 0);
+  const combinedDays = scenarioItems.reduce((s,x) => s + x.daysN, 0);
 
   return (
     <div className="col" style={{ gap: 14 }}>
@@ -527,7 +560,7 @@ function ProjectCost({ p, cost, disc }) {
           <CardH title="Cost S-curve" subtitle="Earned value · planned vs actual vs forecast"/>
           <LineChart
             w={600} h={210}
-            currentIdx={9}
+            currentIdx={sCurve.currentIdx}
             months={sCurveMonths}
             yMax={100}
             series={[
@@ -544,18 +577,25 @@ function ProjectCost({ p, cost, disc }) {
         </div>
 
         <div className="card">
-          <CardH title="Scenario modeling" subtitle="“What if” — instant forecast"/>
-          <div className="col" style={{ gap: 12 }}>
-            <ScenarioRow label="Additional engineers (+2 Mech)" delta="+$108K" days="+0 days"/>
-            <ScenarioRow label="Schedule extension (+3 weeks)" delta="+$215K" days="+21 days"/>
-            <ScenarioRow label="Vendor change (Hydrogen pkg)" delta="-$140K" days="-14 days"/>
-            <ScenarioRow label="VO-007 acoustic enclosure" delta="+$145K" days="+7 days"/>
-          </div>
-          <div style={{ marginTop: 16, padding: 12, background: "var(--accent-soft-2)", borderRadius: 8 }}>
-            <div className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>Combined impact</div>
-            <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.025em", color: "var(--accent)" }}>+$328K · +14 days</div>
-            <div className="muted tiny" style={{ marginTop: 4 }}>Applied to GFB-101 forecast at completion.</div>
-          </div>
+          <CardH title="Scenario modeling" subtitle="Pending change requests · cumulative if all approved"/>
+          {scenarioItems.length === 0 ? (
+            <div className="muted tiny" style={{ padding: "20px 0", textAlign: "center" }}>No pending scenarios for this project.</div>
+          ) : (
+            <>
+              <div className="col" style={{ gap: 12 }}>
+                {scenarioItems.map((s, i) => (
+                  <ScenarioRow key={i} label={s.label} delta={s.delta} days={s.days}/>
+                ))}
+              </div>
+              <div style={{ marginTop: 16, padding: 12, background: "var(--accent-soft-2)", borderRadius: 8 }}>
+                <div className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>Combined impact</div>
+                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.025em", color: "var(--accent)" }}>
+                  {combinedCost >= 0 ? "+$" : "-$"}{Math.abs(combinedCost/1000).toFixed(0)}K · {combinedDays >= 0 ? "+" : ""}{combinedDays} days
+                </div>
+                <div className="muted tiny" style={{ marginTop: 4 }}>Applied to {p.project_code} forecast at completion.</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

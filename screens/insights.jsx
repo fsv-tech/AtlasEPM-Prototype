@@ -108,17 +108,30 @@ function ScreenReports() {
 
 // ============================================
 function ScreenAnalytics() {
-  const months = ["Sep","Oct","Nov","Dec","Jan","Feb","Mar","Apr","May"];
+  const ak = DB.analyticsKPIs();
+  const billable = ak.billableHours;
+  const billableTarget = ak.plannedHours;
+  const revenue = ak.revenue;
+  const avgRate = ak.avgRate;
+  const onTimeRate = ak.onTimePct;
+  const avgVariance = ak.avgVariancePct.toFixed(1);
+  // Last 9 months for trend
+  const monthlyBurn = DB.monthlyBurn(9);
+  const months = monthlyBurn.map(m => m.label);
 
-  // Synthetic but plausible metrics
-  const billable = 13560;      // hours YTD
-  const billableTarget = 18000;
-  const revenue   = 4_240_000; // USD YTD
-  const avgRate   = 88;
-  const winRate   = 67;
-  const onTimeRate = 82;
-  const avgVariance = 1.4;     // %
-  const repeatClients = 73;    // %
+  // Discipline utilization trend — derive 9-month series from current util with smooth ramp-up
+  const discUtilNow = DB.disciplineUtilization();
+  const topDisciplines = discUtilNow
+    .filter(d => ["Mechanical","Electrical","Instrumentation","HSE"].includes(d.name))
+    .map(d => {
+      // synthetic ramp from 60-80% of current up to current — represents trend
+      const cur = d.util;
+      const series = [];
+      for (let i = 0; i < 9; i++) {
+        series.push(Math.max(0, Math.round(cur * (0.65 + 0.35 * i / 8))));
+      }
+      return { name: d.name, color: U.disciplineColors[d.name], data: series };
+    });
 
   return (
     <div className="content" data-tour-id="page">
@@ -136,11 +149,11 @@ function ScreenAnalytics() {
 
       {/* KPI strip */}
       <div className="kpi-grid">
-        <KPI featured label="Billable hours YTD" icon="clock" value={(billable/1000).toFixed(1)} unit="K h" foot={Math.round(billable/billableTarget*100) + "% of target"}/>
-        <KPI label="Revenue YTD" icon="dollar" value={"$" + (revenue/1e6).toFixed(2)} unit="M" delta="+12% YoY" deltaDir="up"/>
-        <KPI label="Avg billable rate" icon="trendUp" value={"$" + avgRate} unit="/h" delta="+$3 vs LY" deltaDir="up"/>
-        <KPI label="Win rate" icon="target" value={winRate + "%"} delta="last 18 bids" sparkData={[58,62,60,65,68,67,70,67]}/>
-        <KPI label="On-time delivery" icon="checkCircle" value={onTimeRate + "%"} delta="Target 90%" deltaDir="down"/>
+        <KPI featured label="Billable hours YTD" icon="clock" value={(billable/1000).toFixed(1)} unit="K h" foot={Math.round(billable/billableTarget*100) + "% of plan"}/>
+        <KPI label="Revenue earned YTD" icon="dollar" value={"$" + (revenue/1e6).toFixed(2)} unit="M" foot="Σ budget × progress"/>
+        <KPI label="Avg billable rate" icon="trendUp" value={"$" + avgRate} unit="/h" foot="across all engineers"/>
+        <KPI label="Active projects" icon="folder" value={DB.projects.filter(p => p.status === "Active").length} foot={DB.projects.length + " total in portfolio"}/>
+        <KPI label="On-time delivery" icon="checkCircle" value={onTimeRate + "%"} foot={DB.deliverables.filter(d=>d.actual_date).length + " delivered"} deltaDir={onTimeRate >= 90 ? "up" : "down"}/>
       </div>
 
       {/* AI insights */}
@@ -155,20 +168,46 @@ function ScreenAnalytics() {
           </div>
         </div>
         <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-          {[
-            { i: "alertTri", k: "Resource bottleneck", t: "Electrical resources overloaded in W32–W34. Recommend +1 mid-level Elec engineer or shift EXP-204 by 3 weeks.", color: "#FCA5A5" },
-            { i: "trendUp",  k: "Cost variance rising", t: "GFB-101 forecast variance grew +1.4% wk-on-wk. Major driver: H2 package vendor change (CR-002).", color: "#FCD34D" },
-            { i: "alertCirc", k: "Risk score increase", t: "Project portfolio risk index up 12% — concentrated in 'logistics' and 'resources' categories. Suggest review.", color: "#A5B4FC" },
-          ].map((s, i) => (
-            <div key={i} style={{ background: "rgba(255,255,255,0.06)", padding: 14, borderRadius: 10 }}>
-              <div className="row" style={{ gap: 8, marginBottom: 6 }}>
-                <Ico name={s.i} size={14} color={s.color}/>
-                <span style={{ fontWeight: 500, fontSize: 12.5 }}>{s.k}</span>
+          {(() => {
+            const insights = [];
+            // 1. Resource bottleneck — highest utilization discipline
+            const topUtil = DB.disciplineUtilization().sort((a,b)=>b.util-a.util)[0];
+            if (topUtil && topUtil.util > 70) {
+              insights.push({
+                i: "alertTri", color: "#FCA5A5",
+                k: "Resource bottleneck",
+                t: `${topUtil.name} at ${topUtil.util}% utilization across ${topUtil.count} engineer${topUtil.count!==1?"s":""}. Consider adding capacity or rebalancing assignments.`,
+              });
+            }
+            // 2. Worst-variance project
+            const worstProj = ak.worst;
+            if (worstProj && worstProj.variancePct > 0) {
+              insights.push({
+                i: "trendUp", color: "#FCD34D",
+                k: "Forecast variance",
+                t: `${worstProj.project.project_code} forecast ${worstProj.variancePct.toFixed(1)}% over budget. Driver: ${worstProj.project.health === "red" ? "scope creep and resource overrun" : "schedule slippage"}.`,
+              });
+            }
+            // 3. Risk concentration
+            const rs = DB.riskSummary();
+            if (rs.rising > 0) {
+              insights.push({
+                i: "alertCirc", color: "#A5B4FC",
+                k: "Rising risks",
+                t: `${rs.rising} risks trending up across the portfolio${rs.high > 0 ? ` — ${rs.high} now classified High severity` : ""}. Suggest risk review session.`,
+              });
+            }
+            return insights.slice(0,3).map((s, i) => (
+              <div key={i} style={{ background: "rgba(255,255,255,0.06)", padding: 14, borderRadius: 10 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 6 }}>
+                  <Ico name={s.i} size={14} color={s.color}/>
+                  <span style={{ fontWeight: 500, fontSize: 12.5 }}>{s.k}</span>
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>{s.t}</div>
+                <button className="btn xs" style={{ marginTop: 10, background: "rgba(255,255,255,0.12)", color: "#fff", border: "none" }}>Investigate</button>
               </div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>{s.t}</div>
-              <button className="btn xs" style={{ marginTop: 10, background: "rgba(255,255,255,0.12)", color: "#fff", border: "none" }}>Investigate</button>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </div>
 
@@ -176,17 +215,11 @@ function ScreenAnalytics() {
         <div className="card">
           <CardH title="Resource utilization trend" subtitle="By discipline, last 9 months"/>
           <LineChart h={220} months={months} yMax={100}
-            series={[
-              { color: "#2563EB", data: [62,68,72,78,82,80,85,88,91], dotR: 3 },
-              { color: "#F59E0B", data: [55,58,60,64,70,72,74,76,80], dotR: 3 },
-              { color: "#8B5CF6", data: [48,52,58,62,66,68,70,72,72], dotR: 3 },
-              { color: "#10B981", data: [40,44,48,52,56,58,60,62,62], dotR: 3 },
-            ]}/>
-          <div className="row" style={{ justifyContent: "center", gap: 18, marginTop: 10, fontSize: 11 }}>
-            <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: "#2563EB" }}/>Mechanical</div>
-            <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: "#F59E0B" }}/>Electrical</div>
-            <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: "#8B5CF6" }}/>Instrumentation</div>
-            <div className="row" style={{ gap: 6 }}><span className="dot" style={{ background: "#10B981" }}/>HSE</div>
+            series={topDisciplines.map(d => ({ color: d.color, data: d.data, dotR: 3 }))}/>
+          <div className="row" style={{ justifyContent: "center", gap: 18, marginTop: 10, fontSize: 11, flexWrap: "wrap" }}>
+            {topDisciplines.map(d => (
+              <div key={d.name} className="row" style={{ gap: 6 }}><span className="dot" style={{ background: d.color }}/>{d.name}</div>
+            ))}
           </div>
         </div>
 
@@ -217,111 +250,142 @@ function ScreenAnalytics() {
           <hr className="divider" style={{ margin: "16px 0 12px" }}/>
           <div className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
             <span className="muted">Avg variance</span>
-            <span className="mono" style={{ color: "var(--amber)" }}>+{avgVariance}%</span>
+            <span className="mono" style={{ color: Number(avgVariance) > 2 ? "var(--red)" : Number(avgVariance) > 0 ? "var(--amber)" : "var(--green)" }}>{Number(avgVariance) >= 0 ? "+" : ""}{avgVariance}%</span>
           </div>
           <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
             <span className="muted">Best performer</span>
-            <span className="mono">BRB-022 (-1.8%)</span>
+            <span className="mono">{ak.best.project.project_code} ({ak.best.variancePct.toFixed(1)}%)</span>
           </div>
           <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
             <span className="muted">Worst performer</span>
-            <span className="mono" style={{ color: "var(--red)" }}>WTP-505 (+8.0%)</span>
+            <span className="mono" style={{ color: "var(--red)" }}>{ak.worst.project.project_code} ({ak.worst.variancePct >= 0 ? "+" : ""}{ak.worst.variancePct.toFixed(1)}%)</span>
           </div>
         </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <div className="card">
-          <CardH title="Hours by discipline (YTD)" subtitle="2026 — total billable hours"/>
-          <Bars h={150} barW={32} gap={10}
-                values={[3400,1850,1600,1450,720,720,540,480]}
-                labels={["Mech","Elec","Instr.","Struct","HSE","Civil","Proc","Comm"]}
-                colors={["#2563EB","#F59E0B","#8B5CF6","#0EA5E9","#10B981","#65A30D","#EC4899","#475569"]}/>
+          <CardH title="Hours by discipline (YTD)" subtitle="Actual hours consumed across all projects"/>
+          {(() => {
+            const discOrder = ["Mechanical","Electrical","Instrumentation","Structural","PM","HSE","Civil","Procurement","Process","Commercial"];
+            const discColors = ["#2563EB","#F59E0B","#8B5CF6","#0EA5E9","#6366F1","#10B981","#65A30D","#EC4899","#14B8A6","#475569"];
+            const discHours = discOrder.map(name =>
+              DB.disciplines.filter(d => d.name === name).reduce((s,d) => s + d.actual_hours, 0)
+            ).filter((_,i) => discOrder[i]); // keep all
+            const filtered = discOrder.map((name, i) => ({ name, hours: discHours[i], color: discColors[i] })).filter(d => d.hours > 0).sort((a,b)=>b.hours-a.hours);
+            return <Bars h={150} barW={32} gap={10}
+              values={filtered.map(d=>d.hours)}
+              labels={filtered.map(d=>d.name.slice(0,5))}
+              colors={filtered.map(d=>d.color)}/>;
+          })()}
         </div>
         <div className="card">
-          <CardH title="Staff demand forecast" subtitle="Next 6 months (FTE equivalent)"/>
-          <Bars h={150} barW={32} gap={10}
-                values={[28,32,36,40,38,34]}
-                labels={["Jun","Jul","Aug","Sep","Oct","Nov"]}
-                colors={["#2563EB","#2563EB","#F59E0B","#EF4444","#F59E0B","#2563EB"]}/>
-          <div className="muted tiny" style={{ marginTop: 10, lineHeight: 1.5 }}>
-            Peak demand in Sep ’26 (40 FTE) driven by GFB-101 final submission + OWF-401 kickoff overlap. Consider proactive hiring or subcontractor framework.
-          </div>
+          <CardH title="Staff demand forecast" subtitle="Next 6 months · derived from assignments"/>
+          {(() => {
+            // For each of next 6 months, count distinct employees assigned in that month
+            const monthsAhead = [];
+            for (let i = 0; i < 6; i++) {
+              const d = new Date(Date.UTC(DB.TODAY.getUTCFullYear(), DB.TODAY.getUTCMonth() + i + 1, 1));
+              const dEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+              const empSet = new Set();
+              let totalAlloc = 0;
+              DB.assignments.forEach(a => {
+                const s = new Date(a.start_date);
+                const e = new Date(a.end_date);
+                if (s <= dEnd && e >= d) {
+                  empSet.add(a.employee_id);
+                  totalAlloc += a.allocation_pct;
+                }
+              });
+              monthsAhead.push({
+                label: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()],
+                fte: Math.round(totalAlloc / 100),
+                count: empSet.size,
+              });
+            }
+            const peak = monthsAhead.reduce((a,b)=>b.fte>a.fte?b:a, monthsAhead[0]);
+            return <>
+              <Bars h={150} barW={32} gap={10}
+                values={monthsAhead.map(m => m.fte)}
+                labels={monthsAhead.map(m => m.label)}
+                colors={monthsAhead.map(m => m.fte === peak.fte ? "var(--red)" : m.fte > peak.fte * 0.85 ? "var(--amber)" : "var(--accent)")}/>
+              <div className="muted tiny" style={{ marginTop: 10, lineHeight: 1.5 }}>
+                Peak demand in {peak.label} ({peak.fte} FTE-equivalent) across {peak.count} engineers. Source: current assignment allocations.
+              </div>
+            </>;
+          })()}
         </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1.2fr 1fr" }}>
         <div className="card">
-          <CardH title="Project type mix" subtitle="By project count and revenue contribution"/>
+          <CardH title="Project type mix" subtitle="By project count and budget contribution"/>
+          {(() => {
+            const mix = DB.projectTypeMix();
+            const typeColors = { "FEED Study": "#2563EB", "Detailed Design": "#0EA5E9", "EPC Support": "#F59E0B", "Concept Design": "#10B981", "Pre-FEED": "#8B5CF6", "Bridging Study": "#EC4899" };
+            return (
           <div className="row" style={{ gap: 18, alignItems: "center" }}>
-            <Donut size={140} thickness={20} segments={[
-              { value: 3, color: "#2563EB" },
-              { value: 2, color: "#10B981" },
-              { value: 2, color: "#F59E0B" },
-              { value: 1, color: "#8B5CF6" },
-            ]} gap={3}>
+            <Donut size={140} thickness={20} segments={mix.map(m => ({ value: m.count, color: typeColors[m.type] || "#94A3B8" }))} gap={3}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.025em" }}>8</div>
+                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.025em" }}>{DB.projects.length}</div>
                 <div className="muted xs">projects</div>
               </div>
             </Donut>
             <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[
-                { l: "FEED / Detailed", c: "#2563EB", v: 3, p: "$17.2M" },
-                { l: "Concept",         c: "#10B981", v: 2, p: "$9.0M" },
-                { l: "EPC support",     c: "#F59E0B", v: 2, p: "$8.6M" },
-                { l: "Pre-FEED",        c: "#8B5CF6", v: 1, p: "$6.7M" },
-              ].map(s => (
-                <div key={s.l} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 10 }}>
+              {mix.map(s => (
+                <div key={s.type} style={{ background: "var(--surface-2)", borderRadius: 8, padding: 10 }}>
                   <div className="row" style={{ gap: 6, fontSize: 11, color: "var(--ink-4)" }}>
-                    <span className="dot" style={{ background: s.c }}/>{s.l}
+                    <span className="dot" style={{ background: typeColors[s.type] || "#94A3B8" }}/>{s.type}
                   </div>
-                  <div style={{ fontSize: 16, fontWeight: 500, letterSpacing: "-0.02em", marginTop: 2 }}>{s.v}</div>
-                  <div className="muted tiny mono">{s.p}</div>
+                  <div style={{ fontSize: 16, fontWeight: 500, letterSpacing: "-0.02em", marginTop: 2 }}>{s.count}</div>
+                  <div className="muted tiny mono">${(s.budget/1e6).toFixed(1)}M</div>
                 </div>
               ))}
             </div>
           </div>
+            );
+          })()}
         </div>
 
         <div className="card">
-          <CardH title="Client concentration" subtitle="Revenue share by client"/>
-          <div className="col" style={{ gap: 8 }}>
-            {[
-              { c: "QatarEnergy LNG",    v: 38, color: "#2563EB" },
-              { c: "QatarEnergy",        v: 22, color: "#0EA5E9" },
-              { c: "QatarEnergy Refining",v: 14, color: "#14B8A6" },
-              { c: "Masdar",             v: 10, color: "#8B5CF6" },
-              { c: "Kahramaa",           v:  8, color: "#10B981" },
-              { c: "Other (3)",          v:  8, color: "#9CA3AF" },
-            ].map(c => (
-              <div key={c.c} className="row" style={{ gap: 10 }}>
-                <span style={{ width: 140, fontSize: 12.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.c}</span>
-                <div className="progress" style={{ flex: 1, height: 8 }}><span style={{ width: c.v + "%", background: c.color }}/></div>
-                <span className="mono tiny" style={{ width: 30, textAlign:"right" }}>{c.v}%</span>
+          <CardH title="Client concentration" subtitle="Revenue share earned by client"/>
+          {(() => {
+            const cc = DB.clientConcentration();
+            const clientColors = ["#2563EB","#0EA5E9","#14B8A6","#8B5CF6","#10B981","#F59E0B","#EC4899","#9CA3AF"];
+            const top3pct = cc.list.slice(0,3).reduce((s,c)=>s+c.pct, 0);
+            return <>
+              <div className="col" style={{ gap: 8 }}>
+                {cc.list.map((c, i) => (
+                  <div key={c.client} className="row" style={{ gap: 10 }}>
+                    <span style={{ width: 140, fontSize: 12.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{c.client}</span>
+                    <div className="progress" style={{ flex: 1, height: 8 }}><span style={{ width: c.pct + "%", background: clientColors[i] || "#9CA3AF" }}/></div>
+                    <span className="mono tiny" style={{ width: 30, textAlign:"right" }}>{c.pct}%</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <hr className="divider" style={{ margin: "12px 0" }}/>
-          <div className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
-            <span className="muted">Top 3 client concentration</span>
-            <span className="mono" style={{ color: "var(--amber)" }}>74%</span>
-          </div>
-          <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
-            <span className="muted">Repeat-business ratio</span>
-            <span className="mono">{repeatClients}%</span>
-          </div>
+              <hr className="divider" style={{ margin: "12px 0" }}/>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 12 }}>
+                <span className="muted">Top 3 client concentration</span>
+                <span className="mono" style={{ color: top3pct > 70 ? "var(--amber)" : "var(--ink-3)" }}>{top3pct}%</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
+                <span className="muted">Total clients</span>
+                <span className="mono">{cc.list.length}</span>
+              </div>
+            </>;
+          })()}
         </div>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
         <div className="card">
-          <CardH title="Risk profile" subtitle="Open risks by severity"/>
+          <CardH title="Risk profile" subtitle="By severity"/>
           {(() => {
-            const notClosed = DB.risks.filter(r => r.status !== "Closed");
-            const highCount = notClosed.filter(r => r.severity === "High").length;
-            const medCount  = notClosed.filter(r => r.severity === "Medium").length;
-            const lowCount  = notClosed.filter(r => r.severity === "Low").length;
+            const rs = DB.riskSummary();
+            const openRisks = DB.risks.filter(r => r.status === "Open");
+            const highCount = openRisks.filter(r => r.severity === "High").length;
+            const medCount  = openRisks.filter(r => r.severity === "Medium").length;
+            const lowCount  = openRisks.filter(r => r.severity === "Low").length;
             return (
           <div className="row" style={{ gap: 18, alignItems: "center" }}>
             <Donut size={120} thickness={16} segments={[
@@ -330,7 +394,7 @@ function ScreenAnalytics() {
               { value: lowCount,  color: "var(--green)" },
             ]} gap={3}>
               <div>
-                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.02em" }}>{notClosed.length}</div>
+                <div style={{ fontSize: 22, fontWeight: 500, letterSpacing: "-0.02em" }}>{openRisks.length}</div>
                 <div className="muted xs">open</div>
               </div>
             </Donut>
@@ -345,6 +409,15 @@ function ScreenAnalytics() {
                   <span className="mono">{s.v}</span>
                 </div>
               ))}
+              <hr className="divider" style={{ margin: "4px 0" }}/>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}>
+                <span className="muted">Mitigated</span>
+                <span className="mono muted">{rs.mitigated}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}>
+                <span className="muted">Closed</span>
+                <span className="mono muted">{rs.closed}</span>
+              </div>
             </div>
           </div>
             );
@@ -380,19 +453,45 @@ function ScreenAnalytics() {
         </div>
 
         <div className="card">
-          <CardH title="Approval throughput" subtitle="Cycle time, by week"/>
-          <Bars h={100} barW={20} gap={6}
-                values={[5.2,4.8,3.9,4.4,3.6,3.2,3.5,2.9]}
-                labels={["W13","W14","W15","W16","W17","W18","W19","W20"]}
-                colors={Array(8).fill("var(--accent)")}/>
-          <div className="row" style={{ justifyContent: "space-between", marginTop: 8, fontSize: 12 }}>
-            <span className="muted">8-week avg</span>
-            <span className="mono">3.9 days</span>
-          </div>
-          <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
-            <span className="muted">Target</span>
-            <span className="mono" style={{ color: "var(--green)" }}>≤ 5.0 d ✓</span>
-          </div>
+          <CardH title="Approval throughput" subtitle="Average cycle time"/>
+          {(() => {
+            const apr = DB.approvalSummary();
+            const avg = apr.avgCycleDays;
+            // Per-week breakdown: approved items grouped by approved_date week
+            const byWeek = {};
+            DB.approvals.filter(a => a.approved_date).forEach(a => {
+              const wk = U.isoWeek(new Date(a.approved_date));
+              const cycle = (new Date(a.approved_date) - new Date(a.raised)) / 86400000;
+              if (!byWeek[wk]) byWeek[wk] = { sum: 0, count: 0 };
+              byWeek[wk].sum += cycle;
+              byWeek[wk].count += 1;
+            });
+            const weeks = Object.keys(byWeek).sort((a,b)=>Number(a)-Number(b));
+            const values = weeks.map(w => Math.round(byWeek[w].sum / byWeek[w].count * 10) / 10);
+            const labels = weeks.map(w => "W" + w);
+            return <>
+              {values.length > 0 ? (
+                <Bars h={100} barW={28} gap={8}
+                  values={values}
+                  labels={labels}
+                  colors={values.map(v => v > 5 ? "var(--red)" : v > 3 ? "var(--amber)" : "var(--accent)")}/>
+              ) : (
+                <div className="muted tiny" style={{ padding: "20px 0", textAlign: "center" }}>No completed approvals yet.</div>
+              )}
+              <div className="row" style={{ justifyContent: "space-between", marginTop: 8, fontSize: 12 }}>
+                <span className="muted">Average</span>
+                <span className="mono">{avg ? avg.toFixed(1) + " days" : "—"}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
+                <span className="muted">Pending now</span>
+                <span className="mono" style={{ color: apr.pending > 5 ? "var(--amber)" : "var(--ink-3)" }}>{apr.pending}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
+                <span className="muted">SLA (≤ 5d)</span>
+                <span className="mono" style={{ color: (avg && avg <= 5) ? "var(--green)" : "var(--red)" }}>{(avg && avg <= 5) ? "On target" : "Behind"}</span>
+              </div>
+            </>;
+          })()}
         </div>
       </div>
     </div>
@@ -539,7 +638,7 @@ function ScreenSettings() {
                     <td>{e.job_title}</td>
                     <td><span className="badge outline" style={{ fontSize: 10 }}>{e.discipline}</span></td>
                     <td><Status value="Active"/></td>
-                    <td className="cell-num">19 May 26 09:14</td>
+                    <td className="cell-num">{U.fmtDate(u.last_login)} {u.last_login.slice(11,16)}</td>
                     <td><span className="badge neutral" style={{ fontSize: 10 }}>Entra ID</span></td>
                     <td><button className="btn xs ghost"><Ico name="more" size={14}/></button></td>
                   </tr>

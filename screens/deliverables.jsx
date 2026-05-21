@@ -149,17 +149,30 @@ function ScreenDeliverableDetail({ deliverableId }) {
   const owner = DB.employeeById(d.owner_employee_id);
   const [tab, setTab] = React.useState("overview");
 
-  // Synthetic revisions, comments
-  const revs = ["A","B","C"].slice(0, d.revision.charCodeAt(0) - 64).map((r, i) => ({
-    rev: r,
-    date: U.fmtDate(new Date(2025, 9 + i, 14)),
-    by: ["EMP-014","EMP-012","EMP-010"][i],
-    note: ["First issue for internal review.", "Updated per HAZOP findings, section 3.4 revised.", "Issued for Construction; cover plate detail clarified."][i],
-  }));
+  // Revisions — generate up to current rev, anchored to the deliverable's planned date
+  const planned = new Date(d.planned_date);
+  const numRevs = d.revision.charCodeAt(0) - 64;
+  const revs = ["A","B","C","D"].slice(0, numRevs).map((r, i) => {
+    // Each revision dated ~30 days apart, ending at actual_date or planned_date
+    const refDate = new Date((d.actual_date || d.planned_date));
+    const revDate = new Date(refDate.getTime() - (numRevs - 1 - i) * 30 * 86400000);
+    return {
+      rev: r,
+      date: U.fmtDate(revDate),
+      by: d.owner_employee_id,
+      note: i === 0
+        ? "First issue for internal review."
+        : i === numRevs - 1
+          ? "Issued for project use; comments incorporated."
+          : "Updated per review feedback; technical content revised.",
+    };
+  });
+  // Comments — generated for this deliverable's owner + project PM
+  const pm = DB.employeeById(p.pm_id);
+  const baseTime = new Date(d.planned_date).getTime() - 5 * 86400000;
   const comments = [
-    { by: "EMP-001", at: "2026-05-15 09:42", text: "Please clarify the load combinations used in Appendix B." },
-    { by: "EMP-012", at: "2026-05-15 11:08", text: "Combinations updated to align with EN 1993-1-1. New version uploaded as Rev B." },
-    { by: "EMP-040", at: "2026-05-16 14:20", text: "Approved by structures, sending for PM sign-off." },
+    { by: pm.employee_id, at: U.fmtDate(new Date(baseTime)) + " 09:42", text: `Please review the inputs against the current ${d.discipline.toLowerCase()} design package.` },
+    { by: d.owner_employee_id, at: U.fmtDate(new Date(baseTime + 86400000)) + " 11:08", text: `Updated to incorporate feedback. ${d.status === "Approved" || d.status === "Issued" ? "Ready for sign-off." : "Continuing internal review."}` },
   ];
 
   return (
@@ -205,29 +218,37 @@ function ScreenDeliverableDetail({ deliverableId }) {
 
         {/* Workflow strip */}
         <div className="row" style={{ marginTop: 22, gap: 0 }}>
-          {[
-            { l: "Draft",     k: "Draft",       at: "Apr 12" },
-            { l: "In review", k: "In Review",   at: "Apr 22" },
-            { l: "Approved",  k: "Approved",    at: "May 03" },
-            { l: "Issued",    k: "Issued",      at: d.status === "Issued" ? "May 18" : null },
-          ].map((s, i, arr) => {
-            const cur = d.status === s.k;
-            const reached = ["Draft","In Progress","In Review","Approved","Issued","Delayed"].indexOf(d.status) >= ["Draft","In Review","Approved","Issued"].indexOf(s.l) ||
-                            (d.status === "In Progress" && s.k === "Draft") ||
-                            (d.status === "Issued" && true);
-            return (
-              <React.Fragment key={s.k}>
-                <div className="col" style={{ alignItems:"center", flex: 1, gap: 4 }}>
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", background: reached || cur ? "var(--accent)" : "var(--surface-3)", color: reached || cur ? "#fff" : "var(--ink-4)", display:"grid", placeItems:"center", border: cur ? "3px solid var(--accent-soft)" : "none" }}>
-                    {reached && !cur ? <Ico name="check" size={14}/> : <span style={{ fontSize: 11, fontWeight: 500 }}>{i+1}</span>}
+          {(() => {
+            // Derive workflow dates from planned_date and actual_date
+            const planDate = new Date(d.planned_date);
+            const stages = [
+              { l: "Draft",     k: "Draft",       offset: -45 },
+              { l: "In review", k: "In Review",   offset: -15 },
+              { l: "Approved",  k: "Approved",    offset: -3 },
+              { l: "Issued",    k: "Issued",      offset: 0 },
+            ];
+            const orderedStatuses = ["Draft","In Progress","In Review","Approved","Issued"];
+            const curIdx = orderedStatuses.indexOf(d.status);
+            return stages.map((s, i, arr) => {
+              const sIdx = orderedStatuses.indexOf(s.k);
+              const cur = d.status === s.k;
+              const reached = curIdx >= sIdx;
+              // Show date for reached stages
+              const stageDate = reached ? U.fmtDate(new Date(planDate.getTime() + s.offset * 86400000)) : null;
+              return (
+                <React.Fragment key={s.k}>
+                  <div className="col" style={{ alignItems:"center", flex: 1, gap: 4 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: reached || cur ? "var(--accent)" : "var(--surface-3)", color: reached || cur ? "#fff" : "var(--ink-4)", display:"grid", placeItems:"center", border: cur ? "3px solid var(--accent-soft)" : "none" }}>
+                      {reached && !cur ? <Ico name="check" size={14}/> : <span style={{ fontSize: 11, fontWeight: 500 }}>{i+1}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: cur ? 500 : 400, color: cur ? "var(--ink)" : "var(--ink-3)" }}>{s.l}</div>
+                    <div className="muted tiny mono">{stageDate || "—"}</div>
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: cur ? 500 : 400, color: cur ? "var(--ink)" : "var(--ink-3)" }}>{s.l}</div>
-                  <div className="muted tiny mono">{s.at || "—"}</div>
-                </div>
-                {i < arr.length - 1 && <div style={{ flex: 1, height: 2, background: reached ? "var(--accent)" : "var(--line)", marginTop: 14 }}/>}
-              </React.Fragment>
-            );
-          })}
+                  {i < arr.length - 1 && <div style={{ flex: 1, height: 2, background: reached ? "var(--accent)" : "var(--line)", marginTop: 14 }}/>}
+                </React.Fragment>
+              );
+            });
+          })()}
         </div>
       </div>
 
@@ -264,26 +285,47 @@ function ScreenDeliverableDetail({ deliverableId }) {
 
               <div className="card">
                 <CardH title="Inputs & dependencies"/>
+                {(() => {
+                  const projDels = DB.deliverables.filter(x => x.project_id === d.project_id && x.deliverable_id !== d.deliverable_id);
+                  // Inputs: same project, planned earlier than this one
+                  const inputs = projDels
+                    .filter(x => x.planned_date < d.planned_date)
+                    .sort((a,b) => b.planned_date.localeCompare(a.planned_date))
+                    .slice(0, 3);
+                  // Feeds into: same project, planned later
+                  const feeds = projDels
+                    .filter(x => x.planned_date > d.planned_date)
+                    .sort((a,b) => a.planned_date.localeCompare(b.planned_date))
+                    .slice(0, 3);
+                  return (
                 <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
                   <div>
-                    <h4 className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>Required inputs</h4>
-                    {["GFB-PR-PFD-001 — PFD","GFB-PR-PID-002 — P&ID","GFB-EL-LDC-001 — Load list"].map(s => (
-                      <div key={s} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--line)", gap: 8 }}>
-                        <Ico name="fileText" size={12} color="var(--ink-3)"/>
-                        <span style={{ fontSize: 12.5 }}>{s}</span>
-                      </div>
-                    ))}
+                    <h4 className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>Predecessors</h4>
+                    {inputs.length === 0 ? <div className="muted tiny">No predecessors.</div> :
+                      inputs.map(x => (
+                        <div key={x.deliverable_id} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--line)", gap: 8, cursor: "pointer" }}
+                             onClick={() => navTo("deliverables/" + x.deliverable_id)}>
+                          <Ico name="fileText" size={12} color="var(--ink-3)"/>
+                          <span style={{ fontSize: 12.5 }}><span className="mono">{x.deliverable_code}</span> — {x.title.slice(0,28)}</span>
+                        </div>
+                      ))
+                    }
                   </div>
                   <div>
-                    <h4 className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>Feeds into</h4>
-                    {["GFB-ME-LAY-001 — 3D model","GFB-ST-DR-101 — Pipe rack GA","Final design freeze"].map(s => (
-                      <div key={s} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--line)", gap: 8 }}>
-                        <Ico name="arrUpRight" size={12} color="var(--ink-3)"/>
-                        <span style={{ fontSize: 12.5 }}>{s}</span>
-                      </div>
-                    ))}
+                    <h4 className="muted xs" style={{ letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8 }}>Successors</h4>
+                    {feeds.length === 0 ? <div className="muted tiny">No successors.</div> :
+                      feeds.map(x => (
+                        <div key={x.deliverable_id} className="row" style={{ padding: "6px 0", borderBottom: "1px solid var(--line)", gap: 8, cursor: "pointer" }}
+                             onClick={() => navTo("deliverables/" + x.deliverable_id)}>
+                          <Ico name="arrUpRight" size={12} color="var(--ink-3)"/>
+                          <span style={{ fontSize: 12.5 }}><span className="mono">{x.deliverable_code}</span> — {x.title.slice(0,28)}</span>
+                        </div>
+                      ))
+                    }
                   </div>
                 </div>
+                  );
+                })()}
               </div>
             </>
           )}
@@ -413,11 +455,29 @@ function ScreenDeliverableDetail({ deliverableId }) {
 
           <div className="card muted">
             <CardH title="Linked items"/>
-            <div className="col" style={{ gap: 6 }}>
-              <a className="row" style={{ gap: 8, fontSize: 12.5, padding: 6 }} href="#/changes/CR-001"><Ico name="git" size={12}/>CR-001 — CPT campaign</a>
-              <a className="row" style={{ gap: 8, fontSize: 12.5, padding: 6 }} href="#/risks"><Ico name="shield" size={12}/>R-007 — Vendor quality</a>
-              <a className="row" style={{ gap: 8, fontSize: 12.5, padding: 6 }} href="#/approvals"><Ico name="checkSquare" size={12}/>APR-008 — Pending</a>
-            </div>
+            {(() => {
+              // Approvals where this deliverable is the entity
+              const linkedApprovals = DB.approvals.filter(a => a.entity_id === d.deliverable_id);
+              // Top changes & risks in same project
+              const linkedChanges = DB.changes.filter(c => c.project_id === d.project_id).slice(0, 1);
+              const linkedRisks   = DB.risks.filter(r => r.project_id === d.project_id && r.status === "Open").slice(0, 1);
+              const items = [];
+              linkedApprovals.forEach(a => items.push({ icon: "checkSquare", href: "#/approvals", label: `${a.approval_id} — ${a.status}` }));
+              linkedChanges.forEach(c   => items.push({ icon: "git",          href: "#/changes/" + c.change_id, label: `${c.change_id} — ${c.title.slice(0,24)}` }));
+              linkedRisks.forEach(r     => items.push({ icon: "shield",       href: "#/risks",   label: `${r.risk_id} — ${r.title.slice(0,24)}` }));
+              if (items.length === 0) {
+                return <div className="muted tiny" style={{ padding: 6 }}>No linked items.</div>;
+              }
+              return (
+                <div className="col" style={{ gap: 6 }}>
+                  {items.map((it, i) => (
+                    <a key={i} className="row" style={{ gap: 8, fontSize: 12.5, padding: 6 }} href={it.href}>
+                      <Ico name={it.icon} size={12}/>{it.label}
+                    </a>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

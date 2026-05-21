@@ -449,35 +449,378 @@ window.DB = (function () {
     { id: "N-08", user_id: "U-001", type: "system",      title: "Weekly progress digest",     message: "Wk 20 — 6 deliverables progressed, 2 risks raised, 3 approvals closed.", link: "#/dashboard", read: true,  created_at: "2026-05-16T07:00:00Z", priority: "low"   },
   ];
 
-  function portfolioKPIs() {
-    const active = projects.filter(p => p.status === "Active" || p.status === "Planning");
-    const budgetTotal = projects.reduce((s,p)=>s+p.budget, 0);
-    const spentTotal  = costs.reduce((s,c)=>s+c.spent, 0);
-    const openRisks = risks.filter(r => r.status !== "Closed").length;
-    // Utilization: average allocation across all engineers with active assignments
-    const assignedEmps = new Set(assignments.map(a => a.employee_id));
-    const totalAllocPct = assignments.reduce((s,a) => s + a.allocation_pct, 0);
-    const utilization = Math.round(totalAllocPct / (employees.length * 100) * 100);
-    return {
-      activeProjects: active.length, totalProjects: projects.length,
-      budgetTotal, spentTotal,
-      resources: employees.length,
-      openRisks, utilization,
-    };
-  }
+  // ============================================
+  // DERIVED METRICS — single source of truth
+  // All screens read from these helpers (not hardcoded numbers)
+  // ============================================
 
-  // Lookup helpers
+  // Project lookups
   function employeeById(id) { return employees.find(e => e.employee_id === id); }
   function projectById(id)  { return projects.find(p => p.project_id === id); }
   function projectByCode(code) { return projects.find(p => p.project_code === code); }
   function deliverableById(id) { return deliverables.find(d => d.deliverable_id === id); }
   function changeById(id) { return changes.find(c => c.change_id === id); }
   function approvalById(id) { return approvals.find(a => a.approval_id === id); }
+  function costByProject(pid) { return costs.find(c => c.project_id === pid); }
+
+  // Today (fixed for prototype) — used in date math
+  const TODAY = new Date("2026-05-19T00:00:00Z");
+
+  // Portfolio-level KPIs
+  function portfolioKPIs() {
+    const active = projects.filter(p => p.status === "Active" || p.status === "Planning");
+    const budgetTotal = projects.reduce((s,p)=>s+p.budget, 0);
+    const spentTotal  = costs.reduce((s,c)=>s+c.spent, 0);
+    const forecastTotal = costs.reduce((s,c)=>s+c.forecast, 0);
+    const committedTotal= costs.reduce((s,c)=>s+c.committed, 0);
+    const openRisks = risks.filter(r => r.status === "Open").length;
+    const totalAllocPct = assignments.reduce((s,a) => s + a.allocation_pct, 0);
+    // Utilization = total allocation hours / total capacity across all employees
+    const utilization = Math.round(totalAllocPct / (employees.length * 100) * 100);
+    // Projects closing in current month
+    const closingThisMonth = projects.filter(p => {
+      const e = new Date(p.end_date);
+      return e.getUTCFullYear() === TODAY.getUTCFullYear() && e.getUTCMonth() === TODAY.getUTCMonth();
+    }).length;
+    return {
+      activeProjects: active.length, totalProjects: projects.length,
+      budgetTotal, spentTotal, forecastTotal, committedTotal,
+      resources: employees.length,
+      openRisks, utilization, closingThisMonth,
+    };
+  }
+
+  // Discipline utilization derived from assignments allocation
+  function disciplineUtilization() {
+    return disciplineNames.map(name => {
+      const team = employees.filter(e => e.discipline === name);
+      const empCount = team.length;
+      if (empCount === 0) return { name, util: 0, count: 0 };
+      const totalAlloc = team.reduce((s,e) => {
+        return s + assignments.filter(a => a.employee_id === e.employee_id).reduce((ss,a) => ss + a.allocation_pct, 0);
+      }, 0);
+      return { name, util: Math.min(100, Math.round(totalAlloc / empCount)), count: empCount };
+    }).filter(d => d.count > 0);
+  }
+
+  // Project-level metrics
+  function projectMetrics(pid) {
+    const p = projectById(pid);
+    if (!p) return null;
+    const c = costByProject(pid);
+    const projDisc = disciplines.filter(d => d.project_id === pid);
+    const projDels = deliverables.filter(d => d.project_id === pid);
+    const projRisks = risks.filter(r => r.project_id === pid);
+    const projChanges = changes.filter(ch => ch.project_id === pid);
+    const projApprovals = approvals.filter(a => a.project_id === pid);
+    const projMilestones = milestones.filter(m => m.project_id === pid);
+    const projTeam = assignments.filter(a => a.project_id === pid);
+
+    const plannedHours = projDisc.reduce((s,d)=>s+d.planned_hours, 0);
+    const actualHours  = projDisc.reduce((s,d)=>s+d.actual_hours, 0);
+    const hoursCompletion = plannedHours ? Math.round(actualHours / plannedHours * 100) : 0;
+
+    const lateDels = projDels.filter(d => {
+      if (d.status === "Approved" || d.status === "Issued") return false;
+      if (d.status === "Delayed") return true;
+      const days = Math.round((new Date(d.planned_date) - TODAY) / 86400000);
+      return days < 0;
+    });
+
+    return {
+      project: p, cost: c, disciplines: projDisc, deliverables: projDels,
+      risks: projRisks, changes: projChanges, approvals: projApprovals,
+      milestones: projMilestones, team: projTeam,
+      plannedHours, actualHours, hoursCompletion,
+      lateDeliverables: lateDels,
+      openRisks: projRisks.filter(r => r.status === "Open"),
+    };
+  }
+
+  // Risk register summary
+  function riskSummary(filter) {
+    const list = filter ? risks.filter(filter) : risks;
+    const open = list.filter(r => r.status === "Open");
+    const notClosed = list.filter(r => r.status !== "Closed");
+    return {
+      total: list.length,
+      open: open.length,
+      mitigated: list.filter(r => r.status === "Mitigated").length,
+      closed: list.filter(r => r.status === "Closed").length,
+      rising: open.filter(r => r.trend === "rising").length,
+      high:   notClosed.filter(r => r.severity === "High").length,
+      medium: notClosed.filter(r => r.severity === "Medium").length,
+      low:    notClosed.filter(r => r.severity === "Low").length,
+      notClosed: notClosed.length,
+    };
+  }
+
+  // Change request impact summary
+  function changeImpact(filter) {
+    const list = filter ? changes.filter(filter) : changes;
+    const active = list.filter(c => c.status !== "Rejected");
+    return {
+      total: list.length,
+      approved: list.filter(c => c.status === "Approved").length,
+      pending:  list.filter(c => ["In Review","Submitted","Pending"].includes(c.status)).length,
+      rejected: list.filter(c => c.status === "Rejected").length,
+      netCost:     active.reduce((s,c)=>s+c.cost_impact, 0),
+      netHours:    list.reduce((s,c)=>s+c.hours_impact, 0),
+      netSchedule: active.reduce((s,c)=>s+c.schedule_impact_days, 0),
+      approvedValue: list.filter(c=>c.status==="Approved").reduce((s,c)=>s+c.cost_impact, 0),
+      pendingValue:  list.filter(c=>["In Review","Submitted","Pending"].includes(c.status)).reduce((s,c)=>s+c.cost_impact, 0),
+    };
+  }
+
+  // Approval pipeline
+  function approvalSummary() {
+    const pending = approvals.filter(a => a.status === "Pending");
+    const approved = approvals.filter(a => a.status === "Approved");
+    // Avg turnaround: for approved items where we have both raised and approved_date
+    const withCycle = approved.filter(a => a.approved_date && a.raised);
+    const avgCycle = withCycle.length === 0 ? null :
+      withCycle.reduce((s,a) => s + (new Date(a.approved_date) - new Date(a.raised)) / 86400000, 0) / withCycle.length;
+    // Overdue: pending items more than 5 days old (5d SLA)
+    const overdue = pending.filter(a => {
+      const days = Math.round((TODAY - new Date(a.raised)) / 86400000);
+      return days > 5;
+    });
+    return {
+      total: approvals.length,
+      pending: pending.length,
+      approved: approved.length,
+      rejected: approvals.filter(a => a.status === "Rejected").length,
+      overdue: overdue.length,
+      avgCycleDays: avgCycle,
+    };
+  }
+
+  // Deliverable status counts
+  function deliverableSummary(filter) {
+    const list = filter ? deliverables.filter(filter) : deliverables;
+    return {
+      total: list.length,
+      draft:       list.filter(d => d.status === "Draft").length,
+      inProgress:  list.filter(d => d.status === "In Progress").length,
+      inReview:    list.filter(d => d.status === "In Review").length,
+      approved:    list.filter(d => d.status === "Approved").length,
+      issued:      list.filter(d => d.status === "Issued").length,
+      delayed:     list.filter(d => d.status === "Delayed").length,
+      approvedOrIssued: list.filter(d => d.status === "Approved" || d.status === "Issued").length,
+      // On-time = delivered (has actual_date) and actual <= planned
+      onTimePct: (() => {
+        const delivered = list.filter(d => d.actual_date);
+        if (delivered.length === 0) return null;
+        const onTime = delivered.filter(d => d.actual_date <= d.planned_date).length;
+        return Math.round(onTime / delivered.length * 100);
+      })(),
+    };
+  }
+
+  // ============================================
+  // TIME-SERIES: Weekly portfolio burn rate
+  // For each week, sum the run-rates of all projects active in that week.
+  // Each project's weekly run-rate = spent ÷ weeks-elapsed-so-far,
+  // so cumulative weekly burn approximates portfolio spend trajectory.
+  // ============================================
+  function weeklyBurn(weeksBack) {
+    weeksBack = weeksBack || 12;
+    const weeks = [];
+    for (let i = weeksBack - 1; i >= 0; i--) {
+      const d = new Date(TODAY.getTime() - i * 7 * 86400000);
+      weeks.push({ label: "W" + U.isoWeek(d), date: d, end: new Date(d.getTime() + 7 * 86400000) });
+    }
+    return weeks.map(w => {
+      let weekTotal = 0;
+      for (const p of projects) {
+        const start = new Date(p.start_date);
+        const end = new Date(p.end_date);
+        if (w.end <= start || w.date > end) continue;
+        const c = costByProject(p.project_id);
+        if (!c || c.spent === 0) continue;
+        // Weeks elapsed at this week's date (not today)
+        const weeksElapsedThen = Math.max(1, (w.date - start) / (7 * 86400000));
+        // Weeks elapsed up to today
+        const weeksElapsedNow = Math.max(1, (TODAY - start) / (7 * 86400000));
+        // Run-rate based on what's been spent so far this week (S-curve ramp)
+        // Use S-shape: progress at week t (vs total) follows logistic curve
+        const totalWeeks = (end - start) / (7 * 86400000);
+        const fracNow = Math.min(1, weeksElapsedNow / totalWeeks);
+        const fracThen = Math.min(1, weeksElapsedThen / totalWeeks);
+        // S-curve cumulative %
+        const sAt = (f) => 0.5 * (1 + Math.tanh(5 * (f - 0.5)));
+        // Spend up to "then" = total_forecast × sAt(fracThen), but scaled by spent/forecast ratio
+        const totalCurveValue = sAt(fracNow);
+        if (totalCurveValue === 0) continue;
+        // Convert cumulative S-curve into weekly increment (derivative)
+        // Approximate: spend_in_week = (sAt(f_then) - sAt(f_then - 1/totalWeeks)) × spent / sAt(fracNow)
+        const fracPrev = Math.max(0, fracThen - 1/totalWeeks);
+        const weekDelta = (sAt(fracThen) - sAt(fracPrev)) / totalCurveValue;
+        weekTotal += c.spent * weekDelta;
+      }
+      return { label: w.label, value: Math.round(weekTotal / 1000) }; // K USD
+    });
+  }
+
+  // Monthly portfolio burn (USD M) — last N months
+  // Each project's spend distributed using S-curve so monthly trace shows ramp-up.
+  function monthlyBurn(monthsBack) {
+    monthsBack = monthsBack || 10;
+    const months = [];
+    for (let i = monthsBack - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(TODAY.getUTCFullYear(), TODAY.getUTCMonth() - i, 1));
+      const monthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+      const label = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()] +
+        (i === monthsBack - 1 || d.getUTCMonth() === 0 ? " " + String(d.getUTCFullYear()).slice(2) : "");
+      months.push({ label, date: d, end: monthEnd });
+    }
+    return months.map(m => {
+      let total = 0;
+      for (const p of projects) {
+        const start = new Date(p.start_date);
+        const end = new Date(p.end_date);
+        if (m.date > end || m.end < start) continue;
+        const c = costByProject(p.project_id);
+        if (!c || c.spent === 0) continue;
+        const totalMonths = (end - start) / (30 * 86400000);
+        const monthsElapsedThen = Math.max(0, (m.end - start) / (30 * 86400000));
+        const monthsElapsedNow  = Math.max(0, (TODAY - start) / (30 * 86400000));
+        const fracNow  = Math.min(1, monthsElapsedNow / totalMonths);
+        const fracThen = Math.min(1, monthsElapsedThen / totalMonths);
+        const fracPrev = Math.max(0, fracThen - 1/totalMonths);
+        const sAt = (f) => 0.5 * (1 + Math.tanh(5 * (f - 0.5)));
+        const totalCurve = sAt(fracNow);
+        if (totalCurve === 0) continue;
+        const monthDelta = (sAt(fracThen) - sAt(fracPrev)) / totalCurve;
+        total += c.spent * monthDelta;
+      }
+      return { label: m.label, value: Math.round(total / 1e5) / 10 }; // M USD, 1 decimal
+    });
+  }
+
+  // S-curve for a project: planned vs actual vs forecast cumulative %
+  function projectSCurve(pid) {
+    const p = projectById(pid);
+    if (!p) return null;
+    const start = new Date(p.start_date);
+    const end = new Date(p.end_date);
+    const totalMonths = Math.max(1, Math.round((end - start) / (30 * 86400000)));
+    const elapsedMonths = Math.max(0, Math.min(totalMonths, Math.round((TODAY - start) / (30 * 86400000))));
+    const months = [];
+    for (let i = 0; i <= totalMonths; i++) {
+      const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
+      const label = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()] +
+        (i === 0 || d.getUTCMonth() === 0 ? " " + String(d.getUTCFullYear()).slice(2) : "");
+      months.push({ label, date: d });
+    }
+    // Generate S-curve shape: slow start, accelerate, plateau
+    // f(t) = 50 * (1 + tanh(6 * (t - 0.5)))  scaled 0 to 100
+    function sCurveAt(frac) {
+      if (frac <= 0) return 0;
+      if (frac >= 1) return 100;
+      return Math.round(50 * (1 + Math.tanh(5 * (frac - 0.5))));
+    }
+    const planned = months.map((_, i) => sCurveAt(i / totalMonths));
+    // Actual: tracks planned but adjusted by health (amber lags by 4pp, red 8pp), only up to current
+    const lag = p.health === "red" ? 8 : p.health === "amber" ? 4 : -1;
+    const actual = months.map((_, i) => i > elapsedMonths ? null : Math.max(0, planned[i] - (i === elapsedMonths ? lag : Math.round(lag * i / Math.max(1,elapsedMonths)))));
+    // Force actual at current month to match project.progress
+    if (elapsedMonths < actual.length) actual[elapsedMonths] = p.progress;
+    // Forecast: from current point onwards, project trajectory based on current burn rate
+    const forecast = months.map((_, i) => {
+      if (i < elapsedMonths) return null;
+      if (i === elapsedMonths) return p.progress;
+      // Linear interpolation from current progress to 100% by end
+      const remainingMonths = totalMonths - elapsedMonths;
+      const remainingProgress = 100 - p.progress;
+      return Math.round(p.progress + remainingProgress * (i - elapsedMonths) / Math.max(1, remainingMonths));
+    });
+    return { months, planned, actual, forecast, currentIdx: elapsedMonths };
+  }
+
+  // Get employee's total allocation across all projects
+  function employeeAllocation(empId) {
+    return assignments.filter(a => a.employee_id === empId).reduce((s,a)=>s+a.allocation_pct, 0);
+  }
+
+  // Get employee's planned hours for a given week
+  function employeeWeekHours(empId, weekIdx) {
+    return allocations
+      .filter(a => a.employee_id === empId && a.week_index === weekIdx)
+      .reduce((s,a) => s + (a.planned_hours || 0), 0);
+  }
+
+  // Analytics — revenue and rates
+  function analyticsKPIs() {
+    // Billable hours = total actual hours across all disciplines
+    const billableHours = disciplines.reduce((s,d) => s + d.actual_hours, 0);
+    const plannedHours  = disciplines.reduce((s,d) => s + d.planned_hours, 0);
+    // Revenue YTD = sum of (budget × progress%) — earned value
+    const revenue = projects.reduce((s,p) => s + p.budget * p.progress / 100, 0);
+    // Avg billable rate: weighted by hours
+    const avgRate = Math.round(
+      employees.reduce((s,e) => s + e.hourly_rate, 0) / employees.length
+    );
+    // On-time delivery rate (deliverables)
+    const delivered = deliverables.filter(d => d.actual_date);
+    const onTime = delivered.filter(d => d.actual_date <= d.planned_date).length;
+    const onTimePct = delivered.length ? Math.round(onTime / delivered.length * 100) : 0;
+    // Forecast variance
+    const avgVariancePct = (costs.reduce((s,c) => s + c.variance / c.budget * 100, 0) / costs.length);
+    // Best / worst performer by variance
+    const sorted = [...costs].sort((a,b) => (a.variance/a.budget) - (b.variance/b.budget));
+    const best = sorted[0];
+    const worst = sorted[sorted.length - 1];
+    return {
+      billableHours, plannedHours,
+      revenue,
+      avgRate,
+      onTimePct,
+      avgVariancePct,
+      best:  { project: projectById(best.project_id), variancePct: best.variance/best.budget*100 },
+      worst: { project: projectById(worst.project_id), variancePct: worst.variance/worst.budget*100 },
+    };
+  }
+
+  // Top revenue clients
+  function clientConcentration() {
+    const byClient = {};
+    projects.forEach(p => {
+      const earned = p.budget * p.progress / 100;
+      byClient[p.client] = (byClient[p.client] || 0) + earned;
+    });
+    const total = Object.values(byClient).reduce((s,v)=>s+v, 0) || 1;
+    const list = Object.entries(byClient)
+      .map(([client, val]) => ({ client, value: val, pct: Math.round(val/total*100) }))
+      .sort((a,b) => b.value - a.value);
+    return { list, total };
+  }
+
+  // Project type mix
+  function projectTypeMix() {
+    const byType = {};
+    projects.forEach(p => {
+      if (!byType[p.project_type]) byType[p.project_type] = { count: 0, budget: 0 };
+      byType[p.project_type].count += 1;
+      byType[p.project_type].budget += p.budget;
+    });
+    return Object.entries(byType).map(([type, v]) => ({ type, ...v }));
+  }
 
   return {
+    // Source data
     roles, disciplineNames, employees, users, projects, activeProject, disciplines, assignments,
     planningWeeks, allocations, deliverables, costs, risks, approvals, changes, milestones,
-    documents, notifications, portfolioKPIs,
+    documents, notifications,
+    // Lookup helpers
     employeeById, projectById, projectByCode, deliverableById, changeById, approvalById,
+    costByProject,
+    // Derived metrics
+    portfolioKPIs, disciplineUtilization, projectMetrics,
+    riskSummary, changeImpact, approvalSummary, deliverableSummary,
+    weeklyBurn, monthlyBurn, projectSCurve,
+    employeeAllocation, employeeWeekHours,
+    analyticsKPIs, clientConcentration, projectTypeMix,
+    TODAY,
   };
 })();

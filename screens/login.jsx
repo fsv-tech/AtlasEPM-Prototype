@@ -31,11 +31,14 @@ function ScreenLogin() {
           </p>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 22, marginTop: 36, maxWidth: 460 }}>
-            {[
-              { v: "18",  l: "Active projects" },
-              { v: "$32M",l: "Budget under mgmt" },
-              { v: "340", l: "Engineers planned" },
-            ].map(s => (
+            {(() => {
+              const kpi = DB.portfolioKPIs();
+              return [
+                { v: String(kpi.activeProjects),                 l: "Active projects" },
+                { v: "$" + (kpi.budgetTotal/1e6).toFixed(0) + "M", l: "Budget under mgmt" },
+                { v: String(kpi.resources),                       l: "Engineers planned" },
+              ];
+            })().map(s => (
               <div key={s.l}>
                 <div style={{ fontSize: 28, fontWeight: 500, letterSpacing: "-0.03em" }}>{s.v}</div>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>{s.l}</div>

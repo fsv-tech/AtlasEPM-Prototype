@@ -21,40 +21,44 @@ assets/
   styles.css                    Design tokens + base styles + components
   icons.jsx                     Lucide-style icon library
   utils.jsx                     fmtDate, fmtMoney, statusClass, helpers
-  tweaks-panel.jsx              (starter) tweaks UI primitives
+  tweaks-panel.jsx              Tweaks UI primitives
 data/
-  index.js                      All mock data, mirrors ERD tables
-                                Exposes window.DB.{users, employees, projects,
-                                disciplines, deliverables, allocations,
-                                weeklyHours, costs, approvals, changes, risks,
-                                milestones, documents, notifications}
+  index.js                      All mock data + derived KPI helpers.
+                                Source: projects, employees, disciplines, assignments,
+                                deliverables, costs, risks, approvals, changes,
+                                milestones, documents, notifications.
+                                Derived (single source of truth):
+                                  portfolioKPIs, disciplineUtilization, projectMetrics,
+                                  riskSummary, changeImpact, approvalSummary,
+                                  deliverableSummary, weeklyBurn, monthlyBurn,
+                                  projectSCurve, analyticsKPIs, clientConcentration,
+                                  projectTypeMix, employeeAllocation
 components/
   shell.jsx                     Sidebar + topbar + role switcher
   widgets.jsx                   KPI cards, charts, sparklines, donuts
   tables.jsx                    DataTable, FilterBar, Drawer, Stat, Field
+  tour.jsx                      Onboarding tour overlay
 screens/
-  login.jsx                     Screen 1 — Sign in
-  dashboard.jsx                 Screen 2 — Executive dashboard
-  projects-list.jsx             Screen 3 — Projects list
-  project-create.jsx            Screen 4 — Create project
-  project-detail.jsx            Screen 5 — Project workspace (with tabs)
-  discipline.jsx                Screen 6 — Discipline workspace
-  employees.jsx                 Screen 7 — Employee database
-  employee-detail.jsx           Screen 8 — Employee profile
-  resource-calendar.jsx         Screen 9 — Resource planning calendar
-  gantt.jsx                     Screen 10 — Gantt planning view
-  cost.jsx                      Screen 11 — Cost management
-  deliverables.jsx              Screen 12 — Deliverables tracker
-  deliverable-detail.jsx        Screen 13 — Deliverable detail
-  approvals.jsx                 Screen 14 — Approval center
-  changes.jsx                   Screen 15 — Change request center
-  risks.jsx                     Screen 16 — Risks
-  reports.jsx                   Screen 17 — Reports center
-  analytics.jsx                 Screen 18 — Analytics
-  notifications.jsx             Screen 19 — Notification center
-  settings.jsx                  Screen 20 — Settings
-archive/                        Previous Helix-PM prototype (kept as reference)
+  login.jsx                     Sign in
+  dashboard.jsx                 Executive dashboard
+  projects-list.jsx             Projects list + new-project create flow
+  project-detail.jsx            Project workspace (tabs: overview, discipline,
+                                schedule, cost, deliverables, risks, change-log)
+  people.jsx                    Employees list, employee profile,
+                                resource calendar (3-screen file)
+  planning.jsx                  Standalone Gantt + cross-project Cost mgmt
+  deliverables.jsx              Deliverables tracker + detail view
+  control.jsx                   Approvals centre + Change requests + Risks
+  insights.jsx                  Reports centre + Analytics + Notifications +
+                                Settings (4-screen file)
 ```
+
+## Data integrity
+
+Every KPI, chart, donut, badge, and percentage on every screen derives from
+`data/index.js`. There are no hardcoded numbers that contradict the source.
+If you change a project's progress, the dashboard, analytics, cost screen,
+project detail S-curve, and burn rate trace all recompute consistently.
 
 ## Routing
 

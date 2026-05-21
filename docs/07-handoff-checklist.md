@@ -64,20 +64,22 @@ These are *placeholders for real work* in production:
 | Fake | Real |
 |---|---|
 | The bottom-right "demo mode" toast on every click | Real backend mutation + optimistic UI |
-| Deliverable Detail → revision history (synthetic) | Real upload-to-blob + version row |
-| Cost S-curve numbers (hard-coded) | Derived from `weekly_allocations` × employee rates × fee factor |
-| AI insights cards (hard-coded copy) | Rules-based for v1; LLM-backed in v2 |
+| Deliverable Detail → revision history (templated from planned/actual dates) | Real upload-to-blob + version row per submission |
+| AI insights cards (templated from current risks/utilization/variance) | Rules-based engine fed by live data; LLM-backed summarisation in v2 |
 | Notifications (8 fixed items) | Real notification engine triggered by domain events |
 | Resource auto-balance suggestions | Real optimisation algorithm (Phase 4 stretch) |
 | Permission matrix (display only) | Real RLS + server checks |
 | Microsoft sign-in button | Real OIDC flow with Entra ID |
 | File uploads in the modal forms | Real multipart → Blob → DB metadata row |
+| Employee skill proficiency bars (deterministic from seniority + employee ID) | Real skills assessment data feeding the bars |
+| Employee time-off / training (deterministic placeholders) | Real leave/PTO module integrated with HR |
 
 ## Things in the prototype that are deliberately right
 
-Keep these. They've been thought through.
+Keep these. They've been thought through and computed correctly from source.
 
-- The 5×5 risk heat map with severity calculation (`CASE WHEN probability*impact >= 15 …`)
+- **Every KPI on every screen** derives from `data/index.js` helpers — no hardcoded numbers
+- The 5×5 risk heat map with severity calculation (`probability × impact`)
 - The status enums (project, deliverable, change, risk, approval)
 - The 10 disciplines list
 - The 10 roles with their permission classes
@@ -86,6 +88,10 @@ Keep these. They've been thought through.
 - The Gantt monthly grid with milestone diamonds
 - The approval workflow chain (Engineer → Lead → PM → Commercial → Executive)
 - The notification taxonomy (approval / deliverable / budget / risk / change / mention / system)
+- The S-curve (planned/actual/forecast) for each project — derived from start_date, end_date, progress, health
+- Weekly + monthly burn-rate distribution using S-curve (tanh) function across project lifetimes
+- Best/worst performer identification by forecast variance / budget
+- Open risk counts that match across dashboard, analytics, and risk register
 
 ## How to know you're on track
 

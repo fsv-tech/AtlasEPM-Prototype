@@ -10,30 +10,18 @@ function ScreenDashboard({ role }) {
   const statusCount = DB.projects.reduce((acc, p) => { acc[p.status] = (acc[p.status]||0)+1; return acc; }, {});
   const healthCount = DB.projects.reduce((acc, p) => { acc[p.health] = (acc[p.health]||0)+1; return acc; }, {});
 
-  // Discipline utilization — derived from assignments allocation_pct
-  const disciplineAssignments = {};
-  DB.assignments.forEach(a => {
-    const emp = DB.employeeById(a.employee_id);
-    if (!emp) return;
-    const disc = emp.discipline;
-    if (!disciplineAssignments[disc]) disciplineAssignments[disc] = { totalAlloc: 0, count: 0 };
-    disciplineAssignments[disc].totalAlloc += a.allocation_pct;
-    disciplineAssignments[disc].count += 1;
-  });
+  // Derived from DB.assignments via helper
+  const disciplineUtil = DB.disciplineUtilization()
+    .filter(d => ["PM","Process","Mechanical","Electrical","Instrumentation","Structural","HSE","Civil","Procurement","Commercial"].includes(d.name))
+    .map(d => ({ ...d, color: U.disciplineColors[d.name] }));
 
-  const disciplineUtil = [
-    "PM","Process","Mechanical","Electrical","Instrumentation",
-    "Structural","HSE","Civil","Procurement","Commercial",
-  ].map(name => {
-    const d = disciplineAssignments[name] || { totalAlloc: 0, count: 0 };
-    // Average allocation across all engineers in this discipline
-    const empCount = DB.employees.filter(e => e.discipline === name).length;
-    const util = empCount > 0 ? Math.min(100, Math.round(d.totalAlloc / empCount)) : 0;
-    return { name, util, color: U.disciplineColors[name] };
-  });
-
-  // Weekly burn — Last 12 weeks, K USD
-  const burn = [128,142,158,176,168,184,201,194,212,224,238,252];
+  // Weekly portfolio burn — derived from costs and project timelines
+  const burnSeries = DB.weeklyBurn(12);
+  const burn = burnSeries.map(b => b.value);
+  const burnLabels = burnSeries.map(b => b.label);
+  const burnCurrent = burn[burn.length - 1];
+  const burnPrev    = burn[burn.length - 2] || 1;
+  const wowPct = ((burnCurrent / burnPrev - 1) * 100).toFixed(1);
 
   return (
     <div className="content">
@@ -52,11 +40,11 @@ function ScreenDashboard({ role }) {
 
       {/* KPI strip */}
       <div className="kpi-grid" data-tour-id="kpi-grid">
-        <KPI data-tour-id="kpi-active" featured label="Active projects" icon="folder" value={kpi.activeProjects} unit={"/ " + kpi.totalProjects} foot="2 closing this month"/>
-        <KPI data-tour-id="kpi-budget" label="Budget under mgmt" icon="dollar" value={"$" + (kpi.budgetTotal/1e6).toFixed(1)} unit="M" delta="+$1.2M vs last Q" deltaDir="up"/>
+        <KPI data-tour-id="kpi-active" featured label="Active projects" icon="folder" value={kpi.activeProjects} unit={"/ " + kpi.totalProjects} foot={kpi.closingThisMonth + " closing this month"}/>
+        <KPI data-tour-id="kpi-budget" label="Budget under mgmt" icon="dollar" value={"$" + (kpi.budgetTotal/1e6).toFixed(1)} unit="M" foot={"$" + (kpi.spentTotal/1e6).toFixed(1) + "M spent · " + Math.round(kpi.spentTotal/kpi.budgetTotal*100) + "%"}/>
         <KPI data-tour-id="kpi-engineers" label="Engineers" icon="users" value={kpi.resources} delta={kpi.utilization + "% avg utilization"} deltaDir="up"/>
-        <KPI data-tour-id="kpi-risks" label="Open risks" icon="shield" value={kpi.openRisks} delta="+2 this week" deltaDir="down" sparkData={[12,13,15,14,16,15,17,16,15,14,13,14]}/>
-        <KPI data-tour-id="kpi-util" label="Utilization" icon="activity" value={kpi.utilization + "%"} delta="Target 80%" sparkData={[71,73,75,72,76,78,80,79,77,76,78,78]} deltaDir="up"/>
+        <KPI data-tour-id="kpi-risks" label="Open risks" icon="shield" value={kpi.openRisks} foot={DB.riskSummary().rising + " trending up"} deltaDir="down"/>
+        <KPI data-tour-id="kpi-util" label="Utilization" icon="activity" value={kpi.utilization + "%"} foot="vs 80% target" deltaDir={kpi.utilization >= 80 ? "up" : "down"}/>
       </div>
 
       {/* Project status + Resource utilization + Weekly burn */}
@@ -144,13 +132,15 @@ function ScreenDashboard({ role }) {
           <CardH title="Weekly burn rate" subtitle="K USD · portfolio · last 12 weeks" action="Cost detail" onAction={() => navTo("cost")}/>
           <div style={{ display:"flex", alignItems:"baseline", justifyContent: "space-between", marginBottom: 10 }}>
             <div style={{ display:"flex", alignItems:"baseline", gap: 8 }}>
-              <span style={{ fontSize: 28, fontWeight: 500, letterSpacing: "-0.028em" }}>${burn[burn.length-1]}K</span>
+              <span style={{ fontSize: 28, fontWeight: 500, letterSpacing: "-0.028em" }}>${burnCurrent}K</span>
               <span className="muted tiny">this week</span>
             </div>
-            <span className="badge red" style={{ fontSize: 10 }}><Ico name="arrUp" size={10}/>+{((burn[burn.length-1]/burn[burn.length-2]-1)*100).toFixed(1)}% wow</span>
+            <span className={"badge " + (Number(wowPct) >= 0 ? "red" : "success")} style={{ fontSize: 10 }}>
+              <Ico name={Number(wowPct) >= 0 ? "arrUp" : "arrDown"} size={10}/>{Number(wowPct) >= 0 ? "+" : ""}{wowPct}% wow
+            </span>
           </div>
-          <Bars values={burn} labels={["W9","W10","W11","W12","W13","W14","W15","W16","W17","W18","W19","W20"]} w={340} h={110} barW={16} gap={6} highlight={11}
-            colors={burn.map((_,i)=> i===11 ? "var(--accent)" : i >= 8 ? "var(--ink-6)" : "#E5E7EB")}/>
+          <Bars values={burn} labels={burnLabels} w={340} h={110} barW={16} gap={6} highlight={burn.length - 1}
+            colors={burn.map((_,i)=> i === burn.length - 1 ? "var(--accent)" : i >= burn.length - 4 ? "var(--ink-6)" : "#E5E7EB")}/>
         </div>
       </div>
 
@@ -266,23 +256,35 @@ function ScreenDashboard({ role }) {
         </div>
 
         <div className="card" data-tour-id="milestones-card">
-          <CardH title="Upcoming milestones" subtitle="GFB-101 · Green Fuel Bridging Study" action="Project plan" onAction={() => navTo("projects/P-001/gantt")}/>
-          {DB.milestones.filter(m => m.status !== "Completed").slice(0,5).map(m => {
-            const d = U.daysFromToday(m.due_date);
-            return (
-              <div key={m.milestone_id} className="row" style={{ padding: "10px 0", borderBottom: "1px solid var(--line)", gap: 12 }}>
-                <div style={{ textAlign:"center", width: 44 }}>
-                  <div style={{ fontSize: 18, fontWeight: 500, letterSpacing: "-0.02em" }}>{d}</div>
-                  <div className="muted xs">days</div>
+          <CardH title="Upcoming milestones" subtitle="Across all active projects" action="View schedule" onAction={() => navTo("gantt")}/>
+          {(() => {
+            const upcoming = DB.milestones
+              .filter(m => m.status !== "Completed")
+              .map(m => ({ ...m, days: U.daysFromToday(m.due_date) }))
+              .filter(m => m.days >= -7) // include barely-overdue too
+              .sort((a,b) => a.days - b.days)
+              .slice(0,5);
+            if (upcoming.length === 0) {
+              return <div className="muted tiny" style={{ padding: "20px 0", textAlign: "center" }}>No upcoming milestones.</div>;
+            }
+            return upcoming.map(m => {
+              const proj = DB.projectById(m.project_id);
+              return (
+                <div key={m.milestone_id} className="row" style={{ padding: "10px 0", borderBottom: "1px solid var(--line)", gap: 12, cursor: "pointer" }}
+                     onClick={() => navTo("projects/" + m.project_id + "/gantt")}>
+                  <div style={{ textAlign:"center", width: 44 }}>
+                    <div style={{ fontSize: 18, fontWeight: 500, letterSpacing: "-0.02em", color: m.days < 0 ? "var(--red)" : m.days < 7 ? "var(--amber)" : "var(--ink)" }}>{m.days}</div>
+                    <div className="muted xs">days</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5 }}>{m.title}</div>
+                    <div className="muted tiny mono" style={{ marginTop: 2 }}>{proj?.project_code} · {U.fmtDate(m.due_date)}</div>
+                  </div>
+                  <Status value={m.status}/>
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5 }}>{m.title}</div>
-                  <div className="muted tiny mono" style={{ marginTop: 2 }}>{m.milestone_id} · {U.fmtDate(m.due_date)}</div>
-                </div>
-                <Status value={m.status}/>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       </div>
     </div>

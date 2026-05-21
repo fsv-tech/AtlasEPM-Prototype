@@ -217,3 +217,37 @@ The prototype enforces these client-side (via `ROLE_NAV` in `components/shell.js
 | AI tables (forecasts, predictions) | Deferred per spec | v2 |
 
 Everything else in the original spec is honoured — 20/20 screens, full design system, full ERD coverage minus the items above, full role + permission matrix.
+
+---
+
+## ✅ Data integrity — every UI number derives from source
+
+After review feedback ("dashboard looks impressive, but the devil is in the
+detail — try get the source data right"), every screen was audited and
+hardcoded numbers were replaced with helpers in `data/index.js`. The single
+source of truth is now:
+
+| Helper | Used by | What it returns |
+|---|---|---|
+| `portfolioKPIs()` | Dashboard KPI strip, Cost screen | Active projects, budget/spent/forecast, open risks, utilization, projects closing this month |
+| `disciplineUtilization()` | Dashboard, Analytics trend | Per-discipline % allocation, derived from `assignments` |
+| `weeklyBurn(n)` / `monthlyBurn(n)` | Dashboard burn chart, Cost screen | Cost time-series using S-curve distribution; totals reconcile to `costs.spent` |
+| `projectSCurve(id)` | Project cost tab | Planned/actual/forecast cumulative %; current marker anchored to `project.progress` |
+| `riskSummary()` | Dashboard, Analytics, Risks | Counts by status × severity + rising-trend count |
+| `changeImpact()` | Changes screen, Analytics | Net cost / hours / schedule with approved-only and pending breakdowns |
+| `approvalSummary()` | Approvals screen, Analytics | Pending/approved/overdue, avg cycle from `raised` → `approved_date`, 5-day SLA |
+| `deliverableSummary()` | Analytics, Deliverables | Counts by status, on-time % from `actual_date ≤ planned_date` |
+| `analyticsKPIs()` | Analytics screen | Billable hours, revenue earned (Σ budget×progress), avg rate, best/worst by variance |
+| `clientConcentration()` | Analytics | Revenue earned by client, sorted descending |
+| `projectTypeMix()` | Analytics | Project count and budget by type |
+| `employeeAllocation(id)` | Resource calendar, AssignModal | Total % across all assignments |
+
+### Reconciliation guarantees (verified at build time)
+
+- Dashboard "Open risks" count == Analytics risk donut count == Risks screen "Open" tab count
+- Cost screen "Spent" total == sum of monthly burn within project life
+- Analytics "Best/worst performer" == sorted variance from `costs`
+- Project detail S-curve current-point % == `project.progress` field
+- Resource calendar "Engineers loaded" == distinct employees in `assignments`
+- All derived metrics react immediately when source rows change (no caching in
+  the prototype; cache TTL ≤ 5 min specified in `docs/03-api-design.md` for prod)

@@ -117,10 +117,25 @@ POST   /reports/{id}/run                      # generates a file, returns blob U
 GET    /reports/{id}/runs                     # history
 POST   /reports/{id}/schedule                 # cron settings
 
-GET    /analytics/portfolio                   # KPIs for dashboard
-GET    /analytics/utilization?from=...&to=... # discipline trend
-GET    /analytics/insights                    # AI panel data
+GET    /analytics/portfolio                   # → portfolioKPIs()
+GET    /analytics/disciplines                 # → disciplineUtilization()
+GET    /analytics/burn-rate?period=weekly     # → weeklyBurn() | monthlyBurn()
+GET    /analytics/burn-rate?period=monthly
+GET    /analytics/risks                       # → riskSummary()
+GET    /analytics/changes                     # → changeImpact()
+GET    /analytics/approvals                   # → approvalSummary()
+GET    /analytics/deliverables                # → deliverableSummary()
+GET    /analytics/clients                     # → clientConcentration()
+GET    /analytics/project-types               # → projectTypeMix()
+GET    /projects/{id}/s-curve                 # → projectSCurve(): planned/actual/forecast
+GET    /projects/{id}/metrics                 # → projectMetrics()
+GET    /analytics/insights                    # AI panel data, derived from above
 ```
+
+Every aggregation endpoint must be a pure read derived from source tables — no
+denormalised KPI tables. Cache aggressively (5-min TTL) but never store derived
+numbers as truth; recompute on demand so writes to projects/costs/risks update
+the dashboard immediately.
 
 ### Notifications
 

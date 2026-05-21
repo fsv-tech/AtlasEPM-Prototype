@@ -6,6 +6,7 @@
 function ScreenApprovals() {
   const [tab, setTab] = React.useState("Pending");
   const list = DB.approvals.filter(a => tab === "All" ? true : a.status === tab);
+  const ap = DB.approvalSummary();
 
   const tabs = ["Pending","Approved","Rejected","All"].map(t => ({
     value: t, label: t, count: t === "All" ? DB.approvals.length : DB.approvals.filter(a => a.status === t).length,
@@ -21,11 +22,11 @@ function ScreenApprovals() {
       />
 
       <div className="kpi-grid">
-        <KPI featured label="Awaiting you" icon="checkSquare" value={DB.approvals.filter(a=>a.status==="Pending").length} foot="action needed"/>
-        <KPI label="Approved this month" icon="checkCircle" value={DB.approvals.filter(a=>a.status==="Approved").length}/>
-        <KPI label="Avg turnaround" icon="clock" value="3.2" unit="d" delta="Target ≤ 5d" deltaDir="up"/>
-        <KPI label="Overdue" icon="alertTri" value="2" delta="follow up" deltaDir="down"/>
-        <KPI label="Auto-routed" icon="zap" value="78%" foot="hit correct approver"/>
+        <KPI featured label="Awaiting you" icon="checkSquare" value={ap.pending} foot="action needed"/>
+        <KPI label="Approved this month" icon="checkCircle" value={ap.approved}/>
+        <KPI label="Avg turnaround" icon="clock" value={ap.avgCycleDays ? ap.avgCycleDays.toFixed(1) : "—"} unit="d" foot="Target ≤ 5d" deltaDir={ap.avgCycleDays && ap.avgCycleDays <= 5 ? "up" : "down"}/>
+        <KPI label="Overdue" icon="alertTri" value={ap.overdue} foot={ap.overdue > 0 ? "follow up" : "all on track"} deltaDir={ap.overdue > 0 ? "down" : "up"}/>
+        <KPI label="Rejected" icon="x" value={ap.rejected} foot="this period"/>
       </div>
 
       {/* Approval pipeline diagram */}
@@ -121,13 +122,18 @@ function ScreenChanges() {
         }
       />
 
+      {(() => {
+        const ci = DB.changeImpact();
+        return (
       <div className="kpi-grid">
-        <KPI featured label="Approved value" icon="checkCircle" value={"$" + (totalApproved/1000).toFixed(0)} unit="K"/>
-        <KPI label="Pending value" icon="clock" value={"$" + (totalPending/1000).toFixed(0)} unit="K" delta={DB.changes.filter(c=>["In Review","Submitted","Pending"].includes(c.status)).length + " items"}/>
-        <KPI label="Total hour impact" icon="activity" value={DB.changes.reduce((s,c)=>s+c.hours_impact,0)} unit="h"/>
-        <KPI label="Schedule impact" icon="calendar" value={DB.changes.reduce((s,c)=>s+c.schedule_impact_days,0)} unit="d" delta="net days"/>
-        <KPI label="Avg cycle" icon="clock" value="6.4" unit="d" foot="submission → decision"/>
+        <KPI featured label="Approved value" icon="checkCircle" value={(ci.approvedValue >= 0 ? "+$" : "-$") + Math.abs(ci.approvedValue/1000).toFixed(0)} unit="K" foot={ci.approved + " approved"}/>
+        <KPI label="Pending value" icon="clock" value={(ci.pendingValue >= 0 ? "+$" : "-$") + Math.abs(ci.pendingValue/1000).toFixed(0)} unit="K" foot={ci.pending + " in review"}/>
+        <KPI label="Total hour impact" icon="activity" value={ci.netHours.toLocaleString()} unit="h" foot="across all CRs"/>
+        <KPI label="Schedule impact" icon="calendar" value={(ci.netSchedule >= 0 ? "+" : "") + ci.netSchedule} unit="d" foot="net days (non-rejected)"/>
+        <KPI label="Rejected" icon="x" value={ci.rejected} foot={"of " + ci.total + " total"}/>
       </div>
+        );
+      })()}
 
       <Tabs active={tab} onChange={setTab} tabs={tabs}/>
 

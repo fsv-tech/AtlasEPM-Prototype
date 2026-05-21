@@ -102,10 +102,14 @@ function ScreenCost() {
   const totalForecast = DB.costs.reduce((s,c)=>s+c.forecast, 0);
   const totalCommitted = DB.costs.reduce((s,c)=>s+c.committed, 0);
 
-  // Monthly burn (synthetic across all projects)
-  const months = ["Aug 25","Sep","Oct","Nov","Dec","Jan 26","Feb","Mar","Apr","May"];
-  const burnByMonth = [1.2,1.4,1.6,1.8,2.1,2.4,2.6,2.8,3.0,3.2];
+  // Monthly burn — derived from costs and project timelines
+  const monthlyBurn = DB.monthlyBurn(10);
+  const months      = monthlyBurn.map(m => m.label);
+  const burnByMonth = monthlyBurn.map(m => m.value);
   const cumulative  = burnByMonth.reduce((acc, v) => { acc.push((acc[acc.length-1]||0) + v); return acc; }, []);
+  // Margin = (revenue earned − cost spent) / revenue earned, where revenue = sum(budget × progress)
+  const revenueEarned = DB.projects.reduce((s,p) => s + p.budget * p.progress / 100, 0);
+  const marginPct = revenueEarned > 0 ? ((revenueEarned - totalSpent) / revenueEarned * 100) : 0;
 
   return (
     <div className="content" data-tour-id="page">
@@ -127,7 +131,7 @@ function ScreenCost() {
         <KPI label="Committed" icon="briefcase" value={"$" + (totalCommitted/1e6).toFixed(1)} unit="M" foot={Math.round(totalCommitted/totalBudget*100) + "% of budget"}/>
         <KPI label="Spent to date" icon="coin" value={"$" + (totalSpent/1e6).toFixed(1)} unit="M" foot={Math.round(totalSpent/totalBudget*100)+"%"} sparkData={cumulative}/>
         <KPI label="Forecast at completion" icon="trendUp" value={"$" + (totalForecast/1e6).toFixed(1)} unit="M" delta={"$" + ((totalForecast-totalBudget)/1e6).toFixed(2) + "M variance"} deltaDir={totalForecast > totalBudget ? "down" : "up"}/>
-        <KPI label="Margin" icon="target" value="14.2%" delta="Target 12%" deltaDir="up"/>
+        <KPI label="Margin" icon="target" value={marginPct.toFixed(1) + "%"} foot="Revenue − cost / revenue" deltaDir={marginPct >= 15 ? "up" : "down"}/>
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
