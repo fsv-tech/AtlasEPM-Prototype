@@ -245,6 +245,7 @@ function RoleSwitcher({ current }) {
 function Topbar({ route, role, onCollapseToggle }) {
   const [popoverOpen, setPopoverOpen] = React.useState(null);
   const [tourOpen, setTourOpen] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
   const toast = useToast();
   const me = DB.employees[0];
   const unread = DB.notifications.filter(n => !n.read).length;
@@ -258,6 +259,38 @@ function Topbar({ route, role, onCollapseToggle }) {
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
   }, []);
+
+  // "?" keyboard shortcut opens help; #/help hash opens it too
+  React.useEffect(() => {
+    function onKey(e) {
+      // Ignore when typing in inputs
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (e.key === "?" && !helpOpen) { e.preventDefault(); setHelpOpen(true); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [helpOpen]);
+
+  // Hash-based help deep linking: #/help or #/help/feature-key opens the drawer
+  React.useEffect(() => {
+    function onHash() {
+      if (location.hash.startsWith("#/help")) {
+        setHelpOpen(true);
+      }
+    }
+    window.addEventListener("hashchange", onHash);
+    // Initial check
+    onHash();
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // When closing help, if we navigated to #/help, pop back to dashboard
+  function closeHelp() {
+    setHelpOpen(false);
+    if (location.hash.startsWith("#/help")) {
+      location.hash = "#/dashboard";
+    }
+  }
 
   return (
     <div className="topbar">
@@ -277,6 +310,11 @@ function Topbar({ route, role, onCollapseToggle }) {
           <Ico name="play" size={12}/>Tour
         </button>
         <a className="btn ghost sm" href="#/projects/new"><Ico name="plus" size={13}/>New project</a>
+
+        {/* Help centre */}
+        <button className="icon-btn" title="Help centre (?)" onClick={() => setHelpOpen(true)} data-no-toast>
+          <Ico name="help" size={16}/>
+        </button>
 
         {/* Notifications popover */}
         <div className="popover-anchor">
@@ -310,6 +348,11 @@ function Topbar({ route, role, onCollapseToggle }) {
       </div>
 
       {tourOpen && <Tour onClose={() => setTourOpen(false)} steps={ATLAS_TOUR_STEPS}/>}
+      {helpOpen && <HelpCentre
+        role={role}
+        onClose={closeHelp}
+        initialFeatureKey={location.hash.startsWith("#/help/") ? location.hash.slice(7) : null}
+      />}
     </div>
   );
 }

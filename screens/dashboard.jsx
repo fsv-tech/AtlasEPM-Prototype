@@ -40,11 +40,11 @@ function ScreenDashboard({ role }) {
 
       {/* KPI strip */}
       <div className="kpi-grid" data-tour-id="kpi-grid">
-        <KPI data-tour-id="kpi-active" featured label="Active projects" icon="folder" value={kpi.activeProjects} unit={"/ " + kpi.totalProjects} foot={kpi.closingThisMonth + " closing this month"}/>
-        <KPI data-tour-id="kpi-budget" label="Budget under mgmt" icon="dollar" value={"$" + (kpi.budgetTotal/1e6).toFixed(1)} unit="M" foot={"$" + (kpi.spentTotal/1e6).toFixed(1) + "M spent · " + Math.round(kpi.spentTotal/kpi.budgetTotal*100) + "%"}/>
-        <KPI data-tour-id="kpi-engineers" label="Engineers" icon="users" value={kpi.resources} delta={kpi.utilization + "% avg utilization"} deltaDir="up"/>
-        <KPI data-tour-id="kpi-risks" label="Open risks" icon="shield" value={kpi.openRisks} foot={DB.riskSummary().rising + " trending up"} deltaDir="down"/>
-        <KPI data-tour-id="kpi-util" label="Utilization" icon="activity" value={kpi.utilization + "%"} foot="vs 80% target" deltaDir={kpi.utilization >= 80 ? "up" : "down"}/>
+        <KPI data-tour-id="kpi-active" featured label="Active projects" icon="folder" value={kpi.activeProjects} unit={"/ " + kpi.totalProjects} foot={kpi.closingThisMonth + " closing this month"} helpKey="projects"/>
+        <KPI data-tour-id="kpi-budget" label="Budget under mgmt" icon="dollar" value={"$" + (kpi.budgetTotal/1e6).toFixed(1)} unit="M" foot={"$" + (kpi.spentTotal/1e6).toFixed(1) + "M spent · " + Math.round(kpi.spentTotal/kpi.budgetTotal*100) + "%"} helpKey="cost"/>
+        <KPI data-tour-id="kpi-engineers" label="Engineers" icon="users" value={kpi.resources} delta={kpi.utilization + "% avg utilization"} deltaDir="up" helpKey="employees"/>
+        <KPI data-tour-id="kpi-risks" label="Open risks" icon="shield" value={kpi.openRisks} foot={DB.riskSummary().rising + " trending up"} deltaDir="down" helpKey="risks"/>
+        <KPI data-tour-id="kpi-util" label="Utilization" icon="activity" value={kpi.utilization + "%"} foot="vs 80% target" deltaDir={kpi.utilization >= 80 ? "up" : "down"} helpKey="calendar"/>
       </div>
 
       {/* Project status + Resource utilization + Weekly burn */}

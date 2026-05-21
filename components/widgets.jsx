@@ -34,12 +34,33 @@ function AvatarStack({ names, employees, size, max = 4 }) {
 }
 
 // ---------- KPI ----------------------------
-function KPI({ label, value, unit, icon, delta, deltaDir, foot, featured, color, sparkData, ...rest }) {
+function KPI({ label, value, unit, icon, delta, deltaDir, foot, featured, color, sparkData, helpKey, ...rest }) {
   return (
     <div className={"kpi" + (featured ? " featured" : "")} {...rest}>
       <div className="kpi-label">
         {icon && <Ico name={icon} size={12} />}
-        {label}
+        <span style={{ flex: 1 }}>{label}</span>
+        {helpKey && (
+          <a
+            href={"#/help/" + helpKey}
+            className="kpi-help-trigger"
+            onClick={e => e.stopPropagation()}
+            title="What is this?"
+            style={{
+              width: 16, height: 16,
+              display: "inline-grid", placeItems: "center",
+              borderRadius: "50%",
+              background: featured ? "rgba(255,255,255,0.15)" : "var(--surface-3)",
+              color: featured ? "rgba(255,255,255,0.8)" : "var(--ink-4)",
+              fontSize: 9.5, fontWeight: 600,
+              textDecoration: "none",
+              opacity: 0.5,
+              transition: "opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-spring)",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "scale(1.15)"; }}
+            onMouseLeave={e => { e.currentTarget.style.opacity = "0.5"; e.currentTarget.style.transform = "scale(1)"; }}
+          >?</a>
+        )}
       </div>
       <div className="kpi-value" style={color ? { color } : null}>
         {value}{unit && <span className="unit">{unit}</span>}

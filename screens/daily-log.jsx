@@ -84,8 +84,8 @@ function ScreenDailyLog({ employeeId }) {
       />
 
       <div className="kpi-grid">
-        <KPI featured label="Today" icon="clock" value={todayHours.toFixed(1)} unit="h" foot={todayEntries.length + " entries"}/>
-        <KPI label="This week" icon="calendar" value={wkReport.summary.totalHours.toFixed(1)} unit="h" foot={wkReport.summary.totalEntries + " entries"}/>
+        <KPI featured label="Today" icon="clock" value={todayHours.toFixed(1)} unit="h" foot={todayEntries.length + " entries"} helpKey="daily-log"/>
+        <KPI label="This week" icon="calendar" value={wkReport.summary.totalHours.toFixed(1)} unit="h" foot={wkReport.summary.totalEntries + " entries"} helpKey="daily-log"/>
         <KPI label="Projects today" icon="folder" value={new Set(todayEntries.map(e => e.project_id).filter(Boolean)).size} foot="distinct projects"/>
         <KPI label="Blockers (week)" icon="alertTri" value={wkReport.summary.totalBlockers} foot={todayBlockers > 0 ? todayBlockers + " today" : "none today"} deltaDir={wkReport.summary.totalBlockers > 0 ? "down" : "up"}/>
         <KPI label="Meetings (week)" icon="users" value={wkReport.summary.totalMeetings}/>
